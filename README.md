@@ -307,6 +307,8 @@ INFO ✅ My Monad Testnet: In-sync · Height: 15,079,199 · Peers: 204
 
 **Done!** Check your Telegram for the startup message.
 
+![Telegram Preview](assets/telegram.png)
+
 ---
 
 ## Dashboard
