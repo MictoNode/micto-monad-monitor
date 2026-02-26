@@ -1,0 +1,73 @@
+# Monad Validator Monitor - Configuration
+# This file runs on the monitoring server
+
+# Telegram Bot Configuration
+telegram:
+  token: "${TELEGRAM_TOKEN}"
+  chat_id: "${TELEGRAM_CHAT_ID}"
+
+# Pushover (Emergency alerts - bypasses DND)
+pushover:
+  user_key: "${PUSHOVER_USER_KEY}"
+  app_token: "${PUSHOVER_APP_TOKEN}"
+
+# Discord Webhook (Optional - alternative notification channel)
+# Create webhook in Discord: Server Settings > Integrations > Webhooks
+discord:
+  webhook_url: "${DISCORD_WEBHOOK_URL}"
+  enabled: true  # Set to false to disable Discord notifications
+
+# Monitoring Settings
+monitoring:
+  check_interval: 60           # Check interval per validator (seconds)
+  alert_threshold: 3           # Consecutive failures before alert
+  extended_report_interval: 21600 # Extended report with block metrics (6 hours)
+  timeout: 10                  # HTTP timeout (seconds)
+
+# Alert Thresholds
+thresholds:
+  cpu_warning: 90
+  cpu_critical: 95
+  memory_warning: 90
+  memory_critical: 95
+  disk_warning: 85
+  disk_critical: 95
+
+# Huginn Tech API (External Validator Status Verification)
+# Provides reliable active set detection via external API
+# Rate limit: 5 validators per hour (cache recommended)
+huginn:
+  enabled: true
+  endpoints:
+    testnet: "https://validator-api-testnet.huginn.tech/monad-api"
+    mainnet: "https://validator-api.huginn.tech/monad-api"
+  check_interval: 600   # Cache duration in seconds (10 minutes)
+  timeout: 10           # API request timeout
+
+# gmonads.com API (Network-wide metrics)
+# Provides TPS, block fullness, and validator set information
+gmonads:
+  enabled: true
+  base_url: "https://www.gmonads.com/api/v1/public"
+  check_interval: 120   # Cache duration in seconds (2 minutes)
+  timeout: 10           # API request timeout
+
+# Logging Configuration
+logging:
+  level: "INFO"         # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  # file: "/app/logs/monitor.log"  # Optional: log to file
+
+# Health Server Configuration
+# Lightweight HTTP server for health checks and Prometheus metrics
+health_server:
+  enabled: true         # Enable/disable health server
+  port: 8181            # Port for health server (NOT 8080 to avoid conflicts)
+  host: "0.0.0.0"       # Bind address
+
+# Dashboard Server Configuration
+# Web UI for real-time validator status monitoring
+# Access via nginx reverse proxy with SSL for production
+dashboard_server:
+  enabled: true         # Enable/disable dashboard server
+  port: 8282            # Port for dashboard server
+  host: "0.0.0.0"       # Bind address (use 0.0.0.0 for Docker)

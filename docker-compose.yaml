@@ -1,0 +1,46 @@
+services:
+  monad-validator-monitor:
+    build: .
+    image: monad-validator-monitor:latest
+    container_name: monad-validator-monitor
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    volumes:
+      # Mount config files from host
+      - ./config/config.yaml:/app/config/config.yaml:ro
+      - ./config/validators.yaml:/app/config/validators.yaml:ro
+      # Persistent volume for state (survives restarts)
+      - monitor-state:/app/state
+
+    # Health endpoint for monitoring
+    ports:
+      - "8181:8181"
+      - "8282:8282"
+
+    environment:
+      - TZ=${TZ:-UTC}
+      - PYTHONUNBUFFERED=1
+      - HEALTH_PORT=${HEALTH_PORT:-8181}
+      - DASHBOARD_PORT=${DASHBOARD_PORT:-8282}
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Health check using internal health endpoint
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8181/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+# Define named volumes
+volumes:
+  monitor-state:

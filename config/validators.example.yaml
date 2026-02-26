@@ -1,0 +1,31 @@
+# Monad Validator Monitor - Validator List
+# Each validator can have different port configurations
+
+validators:
+  - name: "Monad Testnet #1"
+    host: "192.168.1.100"           # Validator IP
+    network: "testnet"              # Network: "testnet" or "mainnet" (for Huginn API)
+    metrics_port: 8889              # Prometheus metrics port
+    rpc_port: 8080                  # JSON-RPC port
+    node_exporter_port: 9100        # Node exporter (optional)
+    validator_secp: "02abc123def456..."  # REQUIRED: secp256k1 public key (66 chars, starts with 02/03)
+    enabled: true
+
+  - name: "Monad Mainnet #1"
+    host: "192.168.1.101"
+    network: "mainnet"
+    metrics_port: 18889             # Different port example
+    rpc_port: 18080
+    node_exporter_port: 19100
+    validator_secp: "03def789abc012..."  # REQUIRED: secp256k1 public key (66 chars, starts with 02/03)
+    enabled: true
+
+  # Example: Disabled validator (won't be monitored)
+  - name: "Monad Testnet #2"
+    host: "10.0.0.50"
+    network: "testnet"
+    metrics_port: 8889
+    rpc_port: 8080
+    node_exporter_port: null        # Set null to disable system metrics
+    validator_secp: "02xyz999def111..."  # Required even if disabled (for when re-enabled)
+    enabled: false

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Monad Validator Monitor - Real-time validator status dashboard">
+    <title>Monad Validator Monitor</title>
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23836EF9' d='M12 3c-2.599 0-9 6.4-9 9s6.401 9 9 9s9-6.401 9-9s-6.401-9-9-9m-1.402 14.146c-1.097-.298-4.043-5.453-3.744-6.549s5.453-4.042 6.549-3.743c1.095.298 4.042 5.453 3.743 6.549c-.298 1.095-5.453 4.042-6.549 3.743'/%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Header - Full Width -->
+    <header class="header">
+        <div class="header-content">
+            <div class="logo">
+                <div class="logo-icon">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path fill="#836EF9" d="M12 3c-2.599 0-9 6.4-9 9s6.401 9 9 9s9-6.401 9-9s-6.401-9-9-9m-1.402 14.146c-1.097-.298-4.043-5.453-3.744-6.549s5.453-4.042 6.549-3.743c1.095.298 4.042 5.453 3.743 6.549c-.298 1.095-5.453 4.042-6.549 3.743"/>
+                    </svg>
+                </div>
+                <div class="logo-text-group">
+                    <span class="logo-text">MONAD</span>
+                    <span class="logo-subtext">Validator Monitor</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content - Centered -->
+    <div class="dashboard">
+        <main class="main-content">
+            <!-- Validator Status Cards Container -->
+            <div id="validators-container" class="validators-container">
+                <!-- Validator cards will be dynamically inserted here -->
+            </div>
+
+            <!-- Status Legend -->
+            <div class="legend-section">
+                <h3 class="legend-title">Status Legend</h3>
+                <div class="legend-items">
+                    <div class="legend-item">
+                        <span class="legend-dot legend-dot--active"></span>
+                        <span class="legend-label">Active</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-dot legend-dot--warning"></span>
+                        <span class="legend-label">Warning</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-dot legend-dot--inactive"></span>
+                        <span class="legend-label">Inactive</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-dot legend-dot--critical"></span>
+                        <span class="legend-label">Critical</span>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Footer - Full Width -->
+    <footer class="footer">
+        <div class="footer-content">
+            <div class="footer-status">
+                <span class="connection-indicator">
+                    <span id="connection-dot" class="connection-dot connected"></span>
+                    <span id="connection-status">Connected</span>
+                </span>
+                <span class="refresh-badge">Auto-refresh: 5s</span>
+            </div>
+            <div class="footer-credit">
+                <span>Made by MictoNode</span>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Validator Card Template -->
+    <template id="validator-card-template">
+        <div class="validator-card" tabindex="0">
+            <div class="card-header">
+                <div class="validator-info">
+                    <span class="validator-indicator"></span>
+                    <span class="validator-name"></span>
+                </div>
+                <span class="validator-status-badge"></span>
+            </div>
+
+            <div class="card-metrics">
+                <div class="metric">
+                    <span class="metric-label">Height</span>
+                    <span class="metric-value metric-height"></span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Peers</span>
+                    <span class="metric-value metric-peers"></span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Uptime</span>
+                    <span class="metric-value metric-uptime"></span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Fails</span>
+                    <span class="metric-value metric-fails"></span>
+                </div>
+            </div>
+
+            <div class="card-footer">
+                <span class="last-check-label">Last check:</span>
+                <span class="last-check-time"></span>
+            </div>
+        </div>
+    </template>
+
+    <script src="app.js"></script>
+</body>
+</html>
