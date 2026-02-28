@@ -47,21 +47,29 @@ class HealthRequestHandler(BaseHTTPRequestHandler):
 
     def _send_json_response(self, data: Dict[str, Any], status_code: int = 200):
         """Send a JSON response"""
-        body = json.dumps(data, indent=2).encode("utf-8")
-        self.send_response(status_code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            body = json.dumps(data, indent=2).encode("utf-8")
+            self.send_response(status_code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            # Client disconnected early - normal, don't log
+            pass
 
     def _send_text_response(self, text: str, status_code: int = 200):
         """Send a plain text response"""
-        body = text.encode("utf-8")
-        self.send_response(status_code)
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            body = text.encode("utf-8")
+            self.send_response(status_code)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            # Client disconnected early - normal, don't log
+            pass
 
     def do_GET(self):
         """Handle GET requests"""

@@ -324,15 +324,19 @@ class GmonadsClient:
 
             validators = []
             for item in items:
-                stake_val = item.get("stake", 0)
-                # Handle string or numeric stake
-                stake = float(stake_val) if stake_val else 0.0
+                # Safe None handling for stake
+                stake_val = item.get("stake")
+                stake = float(stake_val) if stake_val is not None else 0.0
+
+                # Safe None handling for commission
+                commission_val = item.get("commission")
+                commission = float(commission_val) if commission_val is not None else 0.0
 
                 validators.append(EpochValidator(
                     node_id=item.get("node_id", ""),
                     val_index=item.get("val_index", 0),
                     stake=stake,
-                    commission=float(item.get("commission", 0)),
+                    commission=commission,
                     validator_set_type=item.get("validator_set_type", "unknown"),
                     fetched_at=now,
                 ))
@@ -394,10 +398,18 @@ class GmonadsClient:
             total_fullness = 0.0
 
             for bucket in buckets:
-                total_blocks += int(bucket.get("blocks", 0))
-                total_txs += int(bucket.get("txs", 0))
-                total_tps += float(bucket.get("avg_tps", 0))
-                total_fullness += float(bucket.get("avg_block_fullness_pct", 0))
+                # Safe None handling for all numeric conversions
+                blocks_val = bucket.get("blocks")
+                total_blocks += int(blocks_val) if blocks_val is not None else 0
+
+                txs_val = bucket.get("txs")
+                total_txs += int(txs_val) if txs_val is not None else 0
+
+                tps_val = bucket.get("avg_tps")
+                total_tps += float(tps_val) if tps_val is not None else 0.0
+
+                fullness_val = bucket.get("avg_block_fullness_pct")
+                total_fullness += float(fullness_val) if fullness_val is not None else 0.0
 
             # Calculate averages
             bucket_count = len(buckets)
@@ -469,13 +481,17 @@ class GmonadsClient:
             recent_buckets = buckets[split_point:]  # Last buckets
             previous_buckets = buckets[:split_point]  # Earlier buckets
 
+            # Helper function for safe float conversion
+            def safe_float(value):
+                return float(value) if value is not None else 0.0
+
             # Calculate averages for recent
-            recent_tps = sum(float(b.get("avg_tps", 0)) for b in recent_buckets) / len(recent_buckets)
-            recent_fullness = sum(float(b.get("avg_block_fullness_pct", 0)) for b in recent_buckets) / len(recent_buckets)
+            recent_tps = sum(safe_float(b.get("avg_tps")) for b in recent_buckets) / len(recent_buckets)
+            recent_fullness = sum(safe_float(b.get("avg_block_fullness_pct")) for b in recent_buckets) / len(recent_buckets)
 
             # Calculate averages for previous
-            previous_tps = sum(float(b.get("avg_tps", 0)) for b in previous_buckets) / len(previous_buckets)
-            previous_fullness = sum(float(b.get("avg_block_fullness_pct", 0)) for b in previous_buckets) / len(previous_buckets)
+            previous_tps = sum(safe_float(b.get("avg_tps")) for b in previous_buckets) / len(previous_buckets)
+            previous_fullness = sum(safe_float(b.get("avg_block_fullness_pct")) for b in previous_buckets) / len(previous_buckets)
 
             # Calculate change percentages
             tps_change = 0.0
