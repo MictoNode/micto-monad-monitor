@@ -48,7 +48,7 @@ class TestValidatorHealthChecker:
                 thresholds=SystemThresholds(),
             )
 
-            health_status, commits, exec_lagging, ts_validation_fail = checker.check()
+            health_status, commits, exec_lagging, ts_validation_fail, ts_fail_increasing = checker.check()
 
             assert health_status.is_healthy is True
             assert health_status.block_height == 98765
@@ -91,11 +91,11 @@ class TestValidatorHealthChecker:
             )
 
             # First check with no previous commits
-            health_status_1, commits_1, _, _ = checker.check()
+            health_status_1, commits_1, _, _, _ = checker.check()
             assert health_status_1.is_healthy is True
 
             # Second check with same commits (simulating stalled production)
-            health_status_2, commits_2, _, _ = checker.check(last_block_commits=commits_1)
+            health_status_2, commits_2, _, _, _ = checker.check(last_block_commits=commits_1)
             assert health_status_2.is_healthy is False
             assert "stopped producing" in health_status_2.message.lower()
 
@@ -114,7 +114,7 @@ class TestValidatorHealthChecker:
                 timeout=10,
             )
 
-            health_status, commits, _, _ = checker.check()
+            health_status, commits, _, _, _ = checker.check()
 
             assert health_status.is_healthy is False
             assert "connection" in health_status.message.lower() or "failed" in health_status.message.lower()

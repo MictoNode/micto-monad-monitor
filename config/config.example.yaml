@@ -21,6 +21,7 @@ discord:
 monitoring:
   check_interval: 60           # Check interval per validator (seconds)
   alert_threshold: 3           # Consecutive failures before alert
+  ts_validation_fail_threshold: 10 # Consecutive ts_validation_fail increases before WARNING (network-wide issue)
   extended_report_interval: 21600 # Extended report with block metrics (6 hours)
   timeout: 10                  # HTTP timeout (seconds)
 

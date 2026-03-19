@@ -188,6 +188,8 @@ def main():
             "critical_counts": {},  # Track critical resource occurrences
             "last_execution_lagging": None,  # Track execution lagging for increase detection
             "last_ts_validation_fail": None,  # Track ts_validation_fail for increase detection
+            "ts_fails": 0,  # Consecutive ts_validation_fail increases (separate from main fails)
+            "ts_alert_active": False,  # Whether ts_validation_fail alert is currently active
             "last_huginn_timeout_count": None,  # Track Huginn timeout count (network-visible timeouts)
         }
         # Sanitize validator name for filename (replace spaces and special chars)
@@ -235,7 +237,7 @@ def main():
                 checker = health_checkers[validator.name]
 
                 # Perform health check
-                health_status, current_commits, current_execution_lagging, current_ts_validation_fail = checker.check(
+                health_status, current_commits, current_execution_lagging, current_ts_validation_fail, ts_fail_increasing = checker.check(
                     state["last_commits"],
                     state.get("last_execution_lagging"),
                     state.get("last_ts_validation_fail"),
@@ -384,6 +386,32 @@ def main():
 
                 if health_status.is_healthy:
                     state["fails"] = 0
+
+                    # Handle ts_validation_fail tracking (separate from main health)
+                    # ts_validation_fail is often network-wide (clock skew), not validator-specific
+                    ts_threshold = config["monitoring"].get("ts_validation_fail_threshold", 10)
+                    if ts_fail_increasing:
+                        state["ts_fails"] += 1
+                        warning(f"⚠️ {validator.name}: Timestamp validation fails increasing ({state['ts_fails']}/{ts_threshold})")
+
+                        if state["ts_fails"] >= ts_threshold and not state["ts_alert_active"]:
+                            # Send WARNING (not CRITICAL) for ts_validation_fail
+                            alert_success = alerts.alert_warning(
+                                f"*{validator.name}*\n\n⚠️ Persistent timestamp validation fails detected\n"
+                                f"This may be a network-wide issue (clock skew/NTP)\n\n"
+                                f"{health_status.message}"
+                            )
+                            if alert_success:
+                                state["ts_alert_active"] = True
+                    else:
+                        if state["ts_fails"] > 0:
+                            state["ts_fails"] = 0
+                        # Recovery notification for ts_validation_fail
+                        if state["ts_alert_active"]:
+                            alerts.alert_info(
+                                f"✅ *{validator.name}*\n\nTimestamp validation fails stabilized"
+                            )
+                            state["ts_alert_active"] = False
 
                     # Recovery notification (Telegram + Discord)
                     if state["alert_active"]:

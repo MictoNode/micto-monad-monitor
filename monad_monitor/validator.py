@@ -68,7 +68,7 @@ class ValidatorHealthChecker:
         last_block_commits: Optional[float] = None,
         last_execution_lagging: Optional[float] = None,
         last_ts_validation_fail: Optional[float] = None,
-    ) -> Tuple[HealthStatus, Optional[float], Optional[float], Optional[float]]:
+    ) -> Tuple[HealthStatus, Optional[float], Optional[float], Optional[float], bool]:
         """
         Perform health check on validator.
 
@@ -78,7 +78,8 @@ class ValidatorHealthChecker:
             last_ts_validation_fail: Previous ts_validation_fail count (for change detection)
 
         Returns:
-            Tuple of (HealthStatus, current_block_commits, current_execution_lagging, current_ts_validation_fail)
+            Tuple of (HealthStatus, current_block_commits, current_execution_lagging,
+                      current_ts_validation_fail, ts_fail_increasing)
         """
         warnings = []
 
@@ -91,7 +92,7 @@ class ValidatorHealthChecker:
                 message=f"Connection failed: {metrics['error']}",
                 warnings=warnings,
                 criticals=[],
-            ), None, None, None
+            ), None, None, None, False
 
         # Check RPC health
         rpc_healthy = self.scraper.check_rpc_health()
@@ -135,7 +136,7 @@ class ValidatorHealthChecker:
                     criticals=[],
                     is_active_validator=is_active_validator,
                     huginn_data=huginn_data,
-                ), current_commits, last_execution_lagging, current_ts_validation_fail
+                ), current_commits, last_execution_lagging, current_ts_validation_fail, False
 
         # Check execution lagging - only alert if INCREASING
         current_execution_lagging = metrics.get("execution_lagging")
@@ -156,14 +157,17 @@ class ValidatorHealthChecker:
                         criticals=[],
                         is_active_validator=is_active_validator,
                         huginn_data=huginn_data,
-                    ), current_commits, current_execution_lagging, current_ts_validation_fail
+                    ), current_commits, current_execution_lagging, current_ts_validation_fail, False
                 # else: lagging is stable or decreasing, not a problem
             # First check - just add as warning, don't alert yet
             elif last_execution_lagging is None:
                 warnings.append(f"Execution lagging detected: {int(current_execution_lagging)} (monitoring)")
 
-        # Check ts_validation_fail - only alert if INCREASING for active validators
+        # Check ts_validation_fail - only warn if INCREASING for active validators
         # ts_validation_fail is a cumulative counter, so we track the delta
+        # NOTE: This is treated as WARNING (not unhealthy) because timestamp validation
+        # fails are often network-wide (clock skew, NTP issues) and not validator-specific.
+        ts_fail_increasing = False
         if current_ts_validation_fail is not None and current_ts_validation_fail > 0:
             # If not in active set, skip warning entirely - this is expected behavior
             if is_active_validator is False:
@@ -173,19 +177,10 @@ class ValidatorHealthChecker:
             elif is_active_validator is True and last_ts_validation_fail is not None:
                 ts_increase = current_ts_validation_fail - last_ts_validation_fail
                 if ts_increase > 0:
-                    # ts_validation_fail is increasing - this is a problem
-                    return HealthStatus(
-                        is_healthy=False,
-                        message=f"Timestamp validation fails increasing: +{int(ts_increase)} (total: {int(current_ts_validation_fail)})",
-                        metrics=metrics,
-                        block_height=metrics.get("block_height"),
-                        peers=metrics.get("peers"),
-                        rpc_healthy=rpc_healthy,
-                        warnings=warnings,
-                        criticals=[],
-                        is_active_validator=is_active_validator,
-                        huginn_data=huginn_data,
-                    ), current_commits, current_execution_lagging, current_ts_validation_fail
+                    # ts_validation_fail is increasing - add as warning, not unhealthy
+                    # The main loop will track consecutive occurrences separately
+                    ts_fail_increasing = True
+                    warnings.append(f"Timestamp validation fails increasing: +{int(ts_increase)} (total: {int(current_ts_validation_fail)})")
             elif last_ts_validation_fail is None:
                 # First check - just add as warning, don't alert yet
                 warnings.append(f"Timestamp validation fails detected: {int(current_ts_validation_fail)} (monitoring)")
@@ -249,7 +244,7 @@ class ValidatorHealthChecker:
             is_active_validator=is_active_validator,
             huginn_data=huginn_data,
             system_metrics=system_metrics,
-        ), current_commits, current_execution_lagging, current_ts_validation_fail
+        ), current_commits, current_execution_lagging, current_ts_validation_fail, ts_fail_increasing
 
     def _check_system_thresholds(self, system_metrics: Optional[Dict] = None) -> Tuple[List[str], List[str]]:
         """Check system metrics against thresholds and return (warnings, criticals)"""
