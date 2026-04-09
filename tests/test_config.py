@@ -391,3 +391,54 @@ class TestValidateValidators:
         ]
         # Should not raise
         validate_validators(validators)
+
+    def test_validate_validators_invalid_network(self):
+        """Test validation fails when network is not testnet or mainnet"""
+        validators = [
+            ValidatorConfig(
+                name="test",
+                host="192.168.1.1",
+                metrics_port=8889,
+                rpc_port=8080,
+                node_exporter_port=None,
+                validator_secp="02abc123def456789abc123def456789abc123def456789abc123def456789abc123def",
+                enabled=True,
+                network="mainet",  # Typo
+            )
+        ]
+        with pytest.raises(ConfigValidationError) as exc_info:
+            validate_validators(validators)
+        assert "invalid network" in str(exc_info.value)
+        assert "mainet" in str(exc_info.value)
+
+    def test_validate_validators_testnet_valid(self):
+        """Test validation passes with network=testnet"""
+        validators = [
+            ValidatorConfig(
+                name="test",
+                host="192.168.1.1",
+                metrics_port=8889,
+                rpc_port=8080,
+                node_exporter_port=None,
+                validator_secp="02abc123def456789abc123def456789abc123def456789abc123def456789abc123def",
+                enabled=True,
+                network="testnet",
+            )
+        ]
+        validate_validators(validators)
+
+    def test_validate_validators_mainnet_valid(self):
+        """Test validation passes with network=mainnet"""
+        validators = [
+            ValidatorConfig(
+                name="test",
+                host="192.168.1.1",
+                metrics_port=8889,
+                rpc_port=8080,
+                node_exporter_port=None,
+                validator_secp="02abc123def456789abc123def456789abc123def456789abc123def456789abc123def",
+                enabled=True,
+                network="mainnet",
+            )
+        ]
+        validate_validators(validators)

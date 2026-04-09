@@ -21,7 +21,7 @@
         reconnectAttempts: 0,
         lastUpdate: null,
         pollTimer: null,
-        validators: {}  // Per-validator state tracking
+        validators: {}
     };
 
     // DOM Elements
@@ -29,9 +29,7 @@
         validatorsContainer: document.getElementById('validators-container'),
         connectionDot: document.getElementById('connection-dot'),
         connectionStatus: document.getElementById('connection-status'),
-        refreshInfo: document.getElementById('refresh-info'),
-        cardTemplate: document.getElementById('validator-card-template'),
-        networkBadge: document.getElementById('network-badge')
+        cardTemplate: document.getElementById('validator-card-template')
     };
 
     /**
@@ -87,19 +85,19 @@
 
     /**
      * Get status class based on validator state
-     * @param {string} state - Validator state
+     * @param {string} validatorState - Validator state
      * @param {boolean} healthy - Is validator healthy
      * @param {number} fails - Number of failures
      * @returns {string} Status class name
      */
-    function getStatusClass(state, healthy, fails) {
+    function getStatusClass(validatorState, healthy, fails) {
         if (!healthy || fails > 0) {
             return 'critical';
         }
-        if (state === 'active') {
+        if (validatorState === 'active') {
             return 'active';
         }
-        if (state === 'warning') {
+        if (validatorState === 'warning') {
             return 'warning';
         }
         return 'inactive';
@@ -107,19 +105,19 @@
 
     /**
      * Get status display text
-     * @param {string} state - Validator state
+     * @param {string} validatorState - Validator state
      * @param {boolean} healthy - Is validator healthy
      * @param {number} fails - Number of failures
      * @returns {string} Status display text
      */
-    function getStatusText(state, healthy, fails) {
+    function getStatusText(validatorState, healthy, fails) {
         if (!healthy || fails > 0) {
             return 'CRITICAL';
         }
-        if (state === 'active') {
+        if (validatorState === 'active') {
             return 'ACTIVE';
         }
-        if (state === 'warning') {
+        if (validatorState === 'warning') {
             return 'WARNING';
         }
         return 'INACTIVE';
@@ -131,7 +129,7 @@
      * @returns {string} Human readable network name
      */
     function getNetworkDisplayName(network) {
-        if (!network) return 'Unknown';
+        if (!network) return '';
         return network.charAt(0).toUpperCase() + network.slice(1);
     }
 
@@ -157,6 +155,13 @@
         // Set validator name
         card.querySelector('.validator-name').textContent = name;
 
+        // Set network badge
+        const networkBadge = card.querySelector('.validator-network-badge');
+        const network = data.network || 'testnet';
+        networkBadge.textContent = getNetworkDisplayName(network);
+        networkBadge.className = `validator-network-badge ${network}`;
+        networkBadge.setAttribute('aria-label', `Network: ${getNetworkDisplayName(network)}`);
+
         // Set status indicator
         const indicator = card.querySelector('.validator-indicator');
         indicator.className = `validator-indicator ${statusClass}`;
@@ -165,6 +170,9 @@
         const badge = card.querySelector('.validator-status-badge');
         badge.className = `validator-status-badge ${statusClass}`;
         badge.textContent = statusText;
+
+        // Set accessible label for the card
+        card.setAttribute('aria-label', `${name}, ${statusText}, ${getNetworkDisplayName(network)}`);
 
         // Set metrics
         card.querySelector('.metric-height').textContent = formatNumber(data.height);
@@ -193,7 +201,6 @@
         const lastCheckElement = card.querySelector('.last-check-time');
         if (data.last_check) {
             lastCheckElement.textContent = formatTimeAgo(data.last_check);
-            // Store timestamp for updates
             card.dataset.lastCheck = data.last_check;
         } else {
             lastCheckElement.textContent = 'Just now';
@@ -215,6 +222,13 @@
         const statusClass = getStatusClass(validatorState, healthy, fails);
         const statusText = getStatusText(validatorState, healthy, fails);
 
+        // Update network badge
+        const networkBadge = card.querySelector('.validator-network-badge');
+        const network = data.network || 'testnet';
+        networkBadge.textContent = getNetworkDisplayName(network);
+        networkBadge.className = `validator-network-badge ${network}`;
+        networkBadge.setAttribute('aria-label', `Network: ${getNetworkDisplayName(network)}`);
+
         // Update status indicator
         const indicator = card.querySelector('.validator-indicator');
         indicator.className = `validator-indicator ${statusClass}`;
@@ -223,6 +237,9 @@
         const badge = card.querySelector('.validator-status-badge');
         badge.className = `validator-status-badge ${statusClass}`;
         badge.textContent = statusText;
+
+        // Update accessible label
+        card.setAttribute('aria-label', `${card.dataset.validatorName}, ${statusText}, ${getNetworkDisplayName(network)}`);
 
         // Update metrics
         card.querySelector('.metric-height').textContent = formatNumber(data.height);
@@ -274,22 +291,12 @@
     }
 
     /**
-     * Update network badge
-     * @param {string} network - Network name
-     */
-    function updateNetworkBadge(network) {
-        if (elements.networkBadge) {
-            elements.networkBadge.textContent = getNetworkDisplayName(network);
-            elements.networkBadge.className = `network-badge ${network || 'unknown'}`;
-        }
-    }
-
-    /**
      * Render validators from health data
      * @param {Object} data - Health endpoint response
      */
     function renderValidators(data) {
         const validators = data.validators || {};
+
         const existingCards = new Map();
 
         // Collect existing cards
@@ -315,9 +322,6 @@
                 elements.validatorsContainer.appendChild(newCard);
             }
         });
-
-        // Update network badge
-        updateNetworkBadge(data.network);
 
         // Remove cards for validators no longer in response
         existingCards.forEach((card) => {

@@ -163,6 +163,8 @@ def validate_validators(validators: List[ValidatorConfig]) -> None:
             errors.append("Validator missing 'name' field")
         if not v.host:
             errors.append(f"Validator '{v.name or 'unknown'}' missing 'host' field")
+        if v.network not in ("testnet", "mainnet"):
+            errors.append(f"Validator '{v.name}' has invalid network: '{v.network}' (must be 'testnet' or 'mainnet')")
         if not v.validator_secp:
             errors.append(f"Validator '{v.name}' missing 'validator_secp' - required for active set detection via Huginn/gmonads APIs")
         if v.metrics_port and (v.metrics_port < 1 or v.metrics_port > 65535):

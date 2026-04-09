@@ -341,6 +341,7 @@ def main():
                     "fails": state["fails"],
                     "huginn_data": health_status.huginn_data,
                     "last_check": time.time(),  # Timestamp for last check
+                    "network": validator.network,  # Per-validator network
                 }
 
                 # Handle warnings (non-critical alerts)
@@ -463,14 +464,10 @@ def main():
             # Update dashboard server with validator data
             if dashboard_server:
                 health_status = health_server.get_health_status() if health_server else None
-                # Get network from first validator (all should be same network)
-                first_validator = validators[0] if validators else None
-                network = first_validator.network if first_validator else "testnet"
                 dashboard_server.update_validators(
                     validators=health_server_validators,
                     status="healthy" if all_healthy else "unhealthy",
                     uptime_seconds=health_status.uptime_seconds if health_status else 0.0,
-                    network=network,
                 )
 
             # Check if it's time for extended health report (6-hour detailed report)

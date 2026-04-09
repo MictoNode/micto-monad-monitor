@@ -83,6 +83,7 @@
 /* ============================================
    Reset & Base Styles
    ============================================ */
+
 *, *::before, *::after {
     box-sizing: border-box;
     margin: 0;
@@ -356,6 +357,30 @@ body {
     text-overflow: ellipsis;
 }
 
+.validator-network-badge {
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.validator-network-badge.testnet {
+    background-color: var(--status-active-bg);
+    color: var(--network-testnet);
+    border: 1px solid rgba(133, 230, 255, 0.2);
+}
+
+.validator-network-badge.mainnet {
+    background-color: var(--monad-purple-muted);
+    color: var(--network-mainnet);
+    border: 1px solid rgba(131, 110, 249, 0.2);
+}
+
 .validator-status-badge {
     font-family: var(--font-mono);
     font-size: 0.625rem;
@@ -411,6 +436,7 @@ body {
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
+    min-height: 1rem;
 }
 
 .metric-value {
@@ -903,7 +929,7 @@ body {
     }
 
     .logo-subtext {
-        font-size: 0.5rem;
+        font-size: 0.5625rem;
     }
 
     .card-metrics {
@@ -945,7 +971,7 @@ body {
     }
 
     .logo-subtext {
-        font-size: 0.5rem;
+        font-size: 0.5625rem;
     }
 
     .validators-container {
@@ -1006,7 +1032,7 @@ body {
     }
 
     .logo-subtext {
-        font-size: 0.5rem;
+        font-size: 0.5625rem;
     }
 
     .validator-card {
@@ -1028,10 +1054,6 @@ body {
     .card-metrics {
         grid-template-columns: 1fr 1fr;
         gap: var(--space-2);
-    }
-
-    .metric-label {
-        font-size: 0.5625rem;
     }
 
     .metric-value {
@@ -1056,11 +1078,11 @@ body {
     }
 
     .refresh-badge {
-        font-size: 0.5625rem;
+        font-size: 0.625rem;
     }
 
     .footer-credit {
-        font-size: 0.5625rem;
+        font-size: 0.625rem;
     }
 }
 

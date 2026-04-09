@@ -44,7 +44,6 @@ class DashboardServer:
         self._monitor_status: str = "unknown"
         self._uptime_seconds: float = 0.0
         self._version: str = "1.0.0"
-        self._network: str = "testnet"  # Default network
         self._lock = threading.Lock()
 
         # Path to static files
@@ -73,7 +72,6 @@ class DashboardServer:
                 "uptime_seconds": round(self._uptime_seconds, 2),
                 "validators": dict(self._validators_data),
                 "version": self._version,
-                "network": self._network,
             }
 
         return web.json_response(data)
@@ -105,22 +103,19 @@ class DashboardServer:
         validators: Dict[str, Dict[str, Any]],
         status: str = "healthy",
         uptime_seconds: float = 0.0,
-        network: str = "testnet",
     ) -> None:
         """
         Update the validator data for the /health endpoint.
 
         Args:
-            validators: Dict of validator name -> {state, healthy, height, peers, fails, huginn_data, ...}
+            validators: Dict of validator name -> {state, healthy, height, peers, fails, huginn_data, network, ...}
             status: Overall monitor status ("healthy", "unhealthy", "unknown")
             uptime_seconds: Monitor uptime in seconds
-            network: Network name ("testnet" or "mainnet")
         """
         with self._lock:
             self._validators_data = dict(validators)
             self._monitor_status = status
             self._uptime_seconds = uptime_seconds
-            self._network = network
 
     def _create_app(self) -> web.Application:
         """Create and configure the aiohttp application"""

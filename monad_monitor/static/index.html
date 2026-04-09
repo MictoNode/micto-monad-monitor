@@ -13,12 +13,12 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Header - Full Width -->
-    <header class="header">
+    <!-- Header -->
+    <header class="header" role="banner">
         <div class="header-content">
             <div class="logo">
-                <div class="logo-icon">
-                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <div class="logo-icon" aria-hidden="true">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Monad logo">
                         <path fill="#836EF9" d="M12 3c-2.599 0-9 6.4-9 9s6.401 9 9 9s9-6.401 9-9s-6.401-9-9-9m-1.402 14.146c-1.097-.298-4.043-5.453-3.744-6.549s5.453-4.042 6.549-3.743c1.095.298 4.042 5.453 3.743 6.549c-.298 1.095-5.453 4.042-6.549 3.743"/>
                     </svg>
                 </div>
@@ -30,32 +30,31 @@
         </div>
     </header>
 
-    <!-- Main Content - Centered -->
+    <!-- Main Content -->
     <div class="dashboard">
-        <main class="main-content">
+        <main id="main-content" class="main-content" role="main">
             <!-- Validator Status Cards Container -->
-            <div id="validators-container" class="validators-container">
-                <!-- Validator cards will be dynamically inserted here -->
+            <div id="validators-container" class="validators-container" role="list" aria-label="Validator status cards">
             </div>
 
             <!-- Status Legend -->
-            <div class="legend-section">
+            <div class="legend-section" role="complementary" aria-label="Status legend">
                 <h3 class="legend-title">Status Legend</h3>
                 <div class="legend-items">
                     <div class="legend-item">
-                        <span class="legend-dot legend-dot--active"></span>
+                        <span class="legend-dot legend-dot--active" aria-hidden="true"></span>
                         <span class="legend-label">Active</span>
                     </div>
                     <div class="legend-item">
-                        <span class="legend-dot legend-dot--warning"></span>
+                        <span class="legend-dot legend-dot--warning" aria-hidden="true"></span>
                         <span class="legend-label">Warning</span>
                     </div>
                     <div class="legend-item">
-                        <span class="legend-dot legend-dot--inactive"></span>
+                        <span class="legend-dot legend-dot--inactive" aria-hidden="true"></span>
                         <span class="legend-label">Inactive</span>
                     </div>
                     <div class="legend-item">
-                        <span class="legend-dot legend-dot--critical"></span>
+                        <span class="legend-dot legend-dot--critical" aria-hidden="true"></span>
                         <span class="legend-label">Critical</span>
                     </div>
                 </div>
@@ -63,15 +62,15 @@
         </main>
     </div>
 
-    <!-- Footer - Full Width -->
-    <footer class="footer">
+    <!-- Footer -->
+    <footer class="footer" role="contentinfo">
         <div class="footer-content">
             <div class="footer-status">
-                <span class="connection-indicator">
-                    <span id="connection-dot" class="connection-dot connected"></span>
+                <span class="connection-indicator" role="status" aria-live="polite">
+                    <span id="connection-dot" class="connection-dot connected" aria-hidden="true"></span>
                     <span id="connection-status">Connected</span>
                 </span>
-                <span class="refresh-badge">Auto-refresh: 5s</span>
+                <span class="refresh-badge" aria-label="Auto-refresh interval">Auto-refresh: 5s</span>
             </div>
             <div class="footer-credit">
                 <span>Made by MictoNode</span>
@@ -81,16 +80,17 @@
 
     <!-- Validator Card Template -->
     <template id="validator-card-template">
-        <div class="validator-card" tabindex="0">
+        <div class="validator-card" tabindex="0" role="listitem">
             <div class="card-header">
                 <div class="validator-info">
-                    <span class="validator-indicator"></span>
+                    <span class="validator-indicator" aria-hidden="true"></span>
                     <span class="validator-name"></span>
+                    <span class="validator-network-badge" aria-label="Network"></span>
                 </div>
-                <span class="validator-status-badge"></span>
+                <span class="validator-status-badge" role="status"></span>
             </div>
 
-            <div class="card-metrics">
+            <div class="card-metrics" role="group" aria-label="Validator metrics">
                 <div class="metric">
                     <span class="metric-label">Height</span>
                     <span class="metric-value metric-height"></span>
