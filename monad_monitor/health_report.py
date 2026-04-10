@@ -133,12 +133,19 @@ class HealthReporter:
         ])
 
         report = "\n".join(report_lines)
+        plain_report = report.replace("*", "").replace("`", "")
         self.alerts.send_telegram(report)
         # Also send to Discord if configured
         self.alerts.send_discord(
-            message=report.replace("*", "").replace("`", ""),  # Discord doesn't use Markdown
+            message=plain_report,
             title="📊 Monad Health Report",
             color=0x3498db,  # Blue
+        )
+        # Also send to Slack if configured
+        self.alerts.send_slack(
+            message=plain_report,
+            title="📊 Monad Health Report",
+            color="#3498db",
         )
 
     def _send_extended_report(
@@ -265,14 +272,21 @@ class HealthReporter:
         ])
 
         report = "\n".join(report_lines)
+        plain_report = report.replace("*", "").replace("`", "")
         # Send silently (without notification sound) for periodic reports
         self.alerts.send_telegram(report, silent=True)
         # Also send to Discord if configured (silent)
         self.alerts.send_discord(
-            message=report.replace("*", "").replace("`", ""),  # Discord doesn't use Markdown
+            message=plain_report,
             title="📊 Monad Extended Health Report",
             color=0x2ecc71,  # Green for extended report
             silent=True,  # Silent send for periodic report
+        )
+        # Also send to Slack if configured
+        self.alerts.send_slack(
+            message=plain_report,
+            title="📊 Monad Extended Health Report",
+            color="#2ecc71",
         )
 
     def send_startup_report(
@@ -290,16 +304,23 @@ class HealthReporter:
             msg_lines.append(f"• {v.name} (`{v.host}`)")
 
         msg = "\n".join(msg_lines)
+        plain_msg = msg.replace("*", "").replace("`", "")
         self.alerts.send_telegram(msg)
         # Also send to Discord if configured
         self.alerts.send_discord(
-            message=msg.replace("*", "").replace("`", ""),
+            message=plain_msg,
             title="🟢 Monad Monitor Started",
             color=0x2ecc71,  # Green
         )
+        # Also send to Slack if configured
+        self.alerts.send_slack(
+            message=plain_msg,
+            title="🟢 Monad Monitor Started",
+            color="#2ecc71",
+        )
 
     def send_shutdown_report(self) -> None:
-        """Send shutdown notification (Telegram + Discord)"""
+        """Send shutdown notification (Telegram + Discord + Slack)"""
         msg = "🔴 *Monad Monitor Stopped*"
         self.alerts.send_telegram(msg)
         # Also send to Discord if configured
@@ -307,4 +328,10 @@ class HealthReporter:
             message="Monad Monitor Stopped",
             title="🔴 Monad Monitor Stopped",
             color=0xe74c3c,  # Red
+        )
+        # Also send to Slack if configured
+        self.alerts.send_slack(
+            message="Monad Monitor Stopped",
+            title="🔴 Monad Monitor Stopped",
+            color="#e74c3c",
         )

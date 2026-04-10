@@ -1,4 +1,4 @@
-"""Alert handlers - Telegram, Pushover, and Discord"""
+"""Alert handlers - Telegram, Pushover, Discord, and Slack"""
 
 import time
 from typing import Dict, Optional, List, Tuple
@@ -19,13 +19,13 @@ MAX_FAILED_ALERTS_QUEUE_SIZE = 10
 
 
 class AlertHandler:
-    """Handle alerts via Telegram, Pushover, and Discord with rate limiting
+    """Handle alerts via Telegram, Pushover, Discord, and Slack with rate limiting
 
     Rate Limiting Strategy:
     - WARNING/INFO: Subject to rate limiting (prevents spam)
     - CRITICAL Telegram: BYPASSES rate limit (never miss critical alerts)
     - CRITICAL Pushover: Has 30-minute cooldown to prevent alert storms
-    - Discord: Rate limited for non-critical, bypassed for critical
+    - Discord/Slack: Rate limited for non-critical, bypassed for critical
     """
 
     TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
@@ -38,9 +38,11 @@ class AlertHandler:
         pushover_user_key: Optional[str] = None,
         pushover_app_token: Optional[str] = None,
         discord_webhook_url: Optional[str] = None,
+        slack_webhook_url: Optional[str] = None,
         telegram_rate_limit: int = 10,  # Max 10 alerts per minute
         pushover_rate_limit: int = 5,  # Max 5 alerts per minute
         discord_rate_limit: int = 5,  # Max 5 alerts per minute
+        slack_rate_limit: int = 5,  # Max 5 alerts per minute
         pushover_critical_cooldown: int = PUSHOVER_CRITICAL_COOLDOWN_SECONDS,
     ):
         self.telegram_token = telegram_token
@@ -48,6 +50,7 @@ class AlertHandler:
         self.pushover_user_key = pushover_user_key
         self.pushover_app_token = pushover_app_token
         self.discord_webhook_url = discord_webhook_url
+        self.slack_webhook_url = slack_webhook_url
         self.pushover_critical_cooldown = pushover_critical_cooldown
 
         # Initialize rate limiters
@@ -62,6 +65,10 @@ class AlertHandler:
         self._discord_limiter = TokenBucketRateLimiter(
             max_tokens=discord_rate_limit,
             refill_rate=discord_rate_limit / 60.0
+        )
+        self._slack_limiter = TokenBucketRateLimiter(
+            max_tokens=slack_rate_limit,
+            refill_rate=slack_rate_limit / 60.0
         )
 
         # Track critical alerts sent (for monitoring)
@@ -257,8 +264,60 @@ class AlertHandler:
             logger.error(f"Discord send error: {e}")
             return False
 
+    def send_slack(
+        self,
+        message: str,
+        title: str = "Monad Alert",
+        color: str = "#3498db",  # Blue default
+        bypass_rate_limit: bool = False,
+        silent: bool = False,
+    ) -> bool:
+        """Send message via Slack incoming webhook with rate limiting
+
+        Args:
+            message: Message to send
+            title: Attachment title
+            color: Attachment sidebar color (hex string, default blue)
+            bypass_rate_limit: If True, skip rate limiting (for CRITICAL alerts)
+            silent: Unused (Slack webhooks don't support silent mode), kept for API parity
+
+        Returns:
+            True if message was sent successfully, False otherwise
+        """
+        if not self.slack_webhook_url:
+            logger.debug("Slack webhook not configured - skipping Slack alert")
+            return False
+
+        # Check rate limit (unless bypassed for critical alerts)
+        if not bypass_rate_limit:
+            if not self._slack_limiter.consume(1):
+                logger.warning("Slack rate limit exceeded - message dropped")
+                return False
+
+        payload = {
+            "attachments": [
+                {
+                    "title": title,
+                    "text": message,
+                    "color": color,
+                    "ts": int(time.time()),
+                }
+            ]
+        }
+
+        try:
+            response = requests.post(self.slack_webhook_url, json=payload, timeout=10)
+            response.raise_for_status()
+
+            if bypass_rate_limit:
+                logger.info("Slack CRITICAL alert sent (rate limit bypassed)")
+            return True
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Slack send error: {e}")
+            return False
+
     def alert_warning(self, message: str) -> bool:
-        """Send warning alert (Telegram + Discord, rate limited)
+        """Send warning alert (Telegram + Discord + Slack, rate limited)
 
         Returns:
             True if sent successfully to at least one channel, False otherwise
@@ -269,14 +328,19 @@ class AlertHandler:
             title="⚠️ MONAD WARNING",
             color=0xf39c12,  # Orange for warning
         )
-        return telegram_success or discord_success
+        slack_success = self.send_slack(
+            message=message,
+            title="⚠️ MONAD WARNING",
+            color="#f39c12",
+        )
+        return telegram_success or discord_success or slack_success
 
     def alert_critical(self, message: str, validator_name: Optional[str] = None) -> bool:
-        """Send critical alert (Telegram + Pushover + Discord)
+        """Send critical alert (Telegram + Pushover + Discord + Slack)
 
         Telegram: Bypasses rate limit (never miss critical alerts)
         Pushover: Has 30-minute cooldown per validator to prevent alert storms
-        Discord: Bypasses rate limit for critical alerts
+        Discord/Slack: Bypasses rate limit for critical alerts
 
         Args:
             message: Alert message to send
@@ -288,6 +352,7 @@ class AlertHandler:
         telegram_success = False
         pushover_success = False
         discord_success = False
+        slack_success = False
 
         # Telegram alert (bypasses rate limit)
         telegram_success = self.send_telegram(
@@ -314,8 +379,16 @@ class AlertHandler:
             bypass_rate_limit=True,
         )
 
+        # Slack alert (bypasses rate limit for critical)
+        slack_success = self.send_slack(
+            message=message,
+            title="🔴 MONAD CRITICAL ALERT",
+            color="#e74c3c",
+            bypass_rate_limit=True,
+        )
+
         # Track for monitoring
-        if telegram_success or pushover_success or discord_success:
+        if telegram_success or pushover_success or discord_success or slack_success:
             self._critical_alerts_sent += 1
             return True
         else:
@@ -326,7 +399,7 @@ class AlertHandler:
             return False
 
     def alert_info(self, message: str) -> bool:
-        """Send info alert (Telegram + Discord, rate limited)
+        """Send info alert (Telegram + Discord + Slack, rate limited)
 
         Returns:
             True if sent successfully to at least one channel, False otherwise
@@ -337,10 +410,15 @@ class AlertHandler:
             title="ℹ️ MONAD INFO",
             color=0x3498db,  # Blue for info
         )
-        return telegram_success or discord_success
+        slack_success = self.send_slack(
+            message=message,
+            title="ℹ️ MONAD INFO",
+            color="#3498db",
+        )
+        return telegram_success or discord_success or slack_success
 
     def alert_network(self, message: str) -> bool:
-        """Send network-wide alert (Telegram + Discord, rate limited)
+        """Send network-wide alert (Telegram + Discord + Slack, rate limited)
 
         Returns:
             True if sent successfully to at least one channel, False otherwise
@@ -351,7 +429,12 @@ class AlertHandler:
             title="🌐 MONAD NETWORK",
             color=0x9b59b6,  # Purple for network
         )
-        return telegram_success or discord_success
+        slack_success = self.send_slack(
+            message=message,
+            title="🌐 MONAD NETWORK",
+            color="#9b59b6",
+        )
+        return telegram_success or discord_success or slack_success
 
     def get_critical_stats(self) -> dict:
         """Get statistics about critical alerts (for monitoring)"""
@@ -431,7 +514,14 @@ class AlertHandler:
                 bypass_rate_limit=True,
             )
 
-            if telegram_success or pushover_success or discord_success:
+            slack_success = self.send_slack(
+                message=f"[RETRY] {message}",
+                title="🔴 MONAD CRITICAL ALERT (Retry)",
+                color="#e74c3c",
+                bypass_rate_limit=True,
+            )
+
+            if telegram_success or pushover_success or discord_success or slack_success:
                 sent_count += 1
                 logger.info(f"Successfully retried alert for {validator_name or 'unknown'}")
             else:

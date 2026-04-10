@@ -17,6 +17,12 @@ discord:
   webhook_url: "${DISCORD_WEBHOOK_URL}"
   enabled: true  # Set to false to disable Discord notifications
 
+# Slack Webhook (Optional - team notification channel)
+# Create incoming webhook: Apps > Incoming Webhooks > Add to Slack
+slack:
+  webhook_url: "${SLACK_WEBHOOK_URL}"
+  enabled: true  # Set to false to disable Slack notifications
+
 # Monitoring Settings
 monitoring:
   check_interval: 60           # Check interval per validator (seconds)

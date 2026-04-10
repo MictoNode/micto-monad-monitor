@@ -52,13 +52,18 @@ def load_config() -> Dict[str, Any]:
     with open(config_path, encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
-    # Environment variable substitution for sensitive values
+    # All alert channels are optional — initialize missing sections
+    if "telegram" not in config:
+        config["telegram"] = {}
     config["telegram"]["token"] = os.getenv(
         "TELEGRAM_TOKEN", config["telegram"].get("token", "")
     )
     config["telegram"]["chat_id"] = os.getenv(
         "TELEGRAM_CHAT_ID", config["telegram"].get("chat_id", "")
     )
+
+    if "pushover" not in config:
+        config["pushover"] = {}
     config["pushover"]["user_key"] = os.getenv(
         "PUSHOVER_USER_KEY", config["pushover"].get("user_key", "")
     )
@@ -66,11 +71,16 @@ def load_config() -> Dict[str, Any]:
         "PUSHOVER_APP_TOKEN", config["pushover"].get("app_token", "")
     )
 
-    # Discord webhook (optional)
     if "discord" not in config:
         config["discord"] = {}
     config["discord"]["webhook_url"] = os.getenv(
         "DISCORD_WEBHOOK_URL", config["discord"].get("webhook_url", "")
+    )
+
+    if "slack" not in config:
+        config["slack"] = {}
+    config["slack"]["webhook_url"] = os.getenv(
+        "SLACK_WEBHOOK_URL", config["slack"].get("webhook_url", "")
     )
 
     return config
@@ -84,12 +94,17 @@ def validate_config(config: Dict[str, Any]) -> None:
     """
     errors = []
 
-    # Check Telegram configuration
+    # Check that at least one alert channel is configured
     telegram = config.get("telegram", {})
-    if not telegram.get("token"):
-        errors.append("Telegram token is missing (set TELEGRAM_TOKEN env var or config.yaml)")
-    if not telegram.get("chat_id"):
-        errors.append("Telegram chat_id is missing (set TELEGRAM_CHAT_ID env var or config.yaml)")
+    pushover = config.get("pushover", {})
+    discord = config.get("discord", {})
+    slack = config.get("slack", {})
+    has_telegram = telegram.get("token") and telegram.get("chat_id")
+    has_pushover = pushover.get("user_key") and pushover.get("app_token")
+    has_discord = bool(discord.get("webhook_url"))
+    has_slack = bool(slack.get("webhook_url"))
+    if not (has_telegram or has_pushover or has_discord or has_slack):
+        errors.append("No alert channels configured - set at least one of: Telegram, Pushover, Discord, or Slack")
 
     # Check monitoring configuration
     monitoring = config.get("monitoring", {})

@@ -222,16 +222,16 @@ thresholds:
 class TestValidateConfig:
     """Test cases for validate_config function"""
 
-    def test_validate_config_missing_telegram_token(self):
-        """Test validation fails when Telegram token is missing"""
+    def test_validate_config_no_alert_channels(self):
+        """Test validation fails when no alert channels are configured"""
         config = {
-            "telegram": {"chat_id": "test"},
+            "telegram": {},
             "monitoring": {},
             "thresholds": {},
         }
         with pytest.raises(ConfigValidationError) as exc_info:
             validate_config(config)
-        assert "Telegram token" in str(exc_info.value)
+        assert "No alert channels configured" in str(exc_info.value)
 
     def test_validate_config_check_interval_too_low(self):
         """Test validation fails when check_interval is too low"""

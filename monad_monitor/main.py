@@ -140,6 +140,7 @@ def main():
         pushover_user_key=config["pushover"].get("user_key"),
         pushover_app_token=config["pushover"].get("app_token"),
         discord_webhook_url=config.get("discord", {}).get("webhook_url"),
+        slack_webhook_url=config.get("slack", {}).get("webhook_url"),
     )
 
 

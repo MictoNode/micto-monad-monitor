@@ -74,6 +74,9 @@ Thumbs.db
 # Docker
 docker-compose.override.yaml
 
+# Claude
+CLAUDE.md
+
 # Misc
 *.pem
 *.key

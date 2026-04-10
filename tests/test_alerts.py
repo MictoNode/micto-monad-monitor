@@ -770,3 +770,162 @@ class TestDiscordWebhook:
 
             result = handler_with_discord.alert_critical("Critical message")
             assert result is True
+
+
+class TestSlackWebhook:
+    """Test cases for Slack webhook integration"""
+
+    @pytest.fixture
+    def handler_with_slack(self):
+        """Create AlertHandler with Slack configured"""
+        return AlertHandler(
+            telegram_token="test-telegram-token",
+            telegram_chat_id="test-chat-id",
+            pushover_user_key="test-user-key",
+            pushover_app_token="test-app-token",
+            slack_webhook_url="https://hooks.slack.com/services/T123/B456/abc",
+        )
+
+    @pytest.fixture
+    def handler_no_slack(self):
+        """Create AlertHandler without Slack"""
+        return AlertHandler(
+            telegram_token="test-telegram-token",
+            telegram_chat_id="test-chat-id",
+        )
+
+    def test_send_slack_success(self, handler_with_slack):
+        """Test successful Slack message send"""
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.POST,
+                "https://hooks.slack.com/services/T123/B456/abc",
+                body="ok",
+                status=200,
+            )
+
+            result = handler_with_slack.send_slack("Test message")
+            assert result is True
+
+    def test_send_slack_no_webhook(self, handler_no_slack):
+        """Test Slack send with no webhook configured"""
+        result = handler_no_slack.send_slack("Test message")
+        assert result is False
+
+    def test_send_slack_api_failure(self, handler_with_slack):
+        """Test Slack send handles API failure"""
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.POST,
+                "https://hooks.slack.com/services/T123/B456/abc",
+                body="invalid_payload",
+                status=400,
+            )
+
+            result = handler_with_slack.send_slack("Test message")
+            assert result is False
+
+    def test_slack_attachment_format(self, handler_with_slack):
+        """Test that Slack message uses attachment format"""
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.POST,
+                "https://hooks.slack.com/services/T123/B456/abc",
+                body="ok",
+                status=200,
+            )
+
+            handler_with_slack.send_slack("Test message", title="Test Title", color="#FF0000")
+
+            request_body = json.loads(rsps.calls[0].request.body)
+            assert "attachments" in request_body
+            assert len(request_body["attachments"]) == 1
+            assert request_body["attachments"][0]["title"] == "Test Title"
+            assert request_body["attachments"][0]["text"] == "Test message"
+            assert request_body["attachments"][0]["color"] == "#FF0000"
+
+    def test_critical_alert_sends_to_slack(self, handler_with_slack):
+        """Test that alert_critical sends to Slack"""
+        with responses.RequestsMock() as rsps:
+            # Telegram
+            rsps.add(
+                responses.POST,
+                "https://api.telegram.org/bottest-telegram-token/sendMessage",
+                json={"ok": True},
+                status=200,
+            )
+            # Pushover
+            rsps.add(
+                responses.POST,
+                "https://api.pushover.net/1/messages.json",
+                json={"status": 1},
+                status=200,
+            )
+            # Slack
+            rsps.add(
+                responses.POST,
+                "https://hooks.slack.com/services/T123/B456/abc",
+                body="ok",
+                status=200,
+            )
+
+            result = handler_with_slack.alert_critical("Critical message")
+            assert result is True
+            # Should have 3 calls (Telegram, Pushover, Slack)
+            assert len(rsps.calls) == 3
+
+    def test_slack_rate_limiting(self, handler_with_slack):
+        """Test that Slack is rate limited for non-critical alerts"""
+        # Exhaust rate limiter
+        for i in range(10):
+            handler_with_slack._slack_limiter.consume(1)
+
+        # Should be blocked
+        result = handler_with_slack.send_slack("Normal message")
+        assert result is False
+
+    def test_slack_bypass_rate_limit(self, handler_with_slack):
+        """Test that Slack bypasses rate limit for critical alerts"""
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.POST,
+                "https://hooks.slack.com/services/T123/B456/abc",
+                body="ok",
+                status=200,
+            )
+
+            # Exhaust rate limiter
+            for i in range(10):
+                handler_with_slack._slack_limiter.consume(1)
+
+            # With bypass should succeed
+            result = handler_with_slack.send_slack("Critical", bypass_rate_limit=True)
+            assert result is True
+
+    def test_critical_success_with_only_slack(self, handler_with_slack):
+        """Test that critical returns True if only Slack succeeds"""
+        with responses.RequestsMock() as rsps:
+            # Telegram fails
+            rsps.add(
+                responses.POST,
+                "https://api.telegram.org/bottest-telegram-token/sendMessage",
+                json={"ok": False},
+                status=500,
+            )
+            # Pushover fails
+            rsps.add(
+                responses.POST,
+                "https://api.pushover.net/1/messages.json",
+                json={"status": 0},
+                status=500,
+            )
+            # Slack succeeds
+            rsps.add(
+                responses.POST,
+                "https://hooks.slack.com/services/T123/B456/abc",
+                body="ok",
+                status=200,
+            )
+
+            result = handler_with_slack.alert_critical("Critical message")
+            assert result is True
