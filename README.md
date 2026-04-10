@@ -18,6 +18,8 @@
 - **Active set tracking** - Know when your validator enters/leaves active set
 - **Pushover emergency alerts** - Bypass Do Not Disturb mode
 - **Discord webhook support** - Community alerts
+- **Slack webhook support** - Team alerts
+- **All alert channels optional** - Use any combination of Telegram, Pushover, Discord, Slack
 
 ---
 
@@ -71,7 +73,7 @@ docker compose up -d
 docker compose logs -f
 ```
 
-You should get a **"Monad Monitor Started"** message on Telegram.
+You should get a **"Monad Monitor Started"** message on your configured alert channel(s).
 
 **Dashboard:** `http://your-server-ip:8282`
 
@@ -81,21 +83,22 @@ You should get a **"Monad Monitor Started"** message on Telegram.
 
 | Alert Type | When | Channels |
 |------------|------|----------|
-| **Node Down** | Can't reach metrics or blocks stopped | Telegram + Pushover + Discord |
-| **High Resources (Critical)** | CPU/RAM/Disk ≥ 95% | Telegram + Pushover + Discord |
-| **High Resources (Warning)** | CPU/RAM/Disk ≥ 90% | Telegram + Discord |
-| **Active Set Changes** | Enters or leaves active set | Telegram + Discord |
-| **Recovery** | Validator back online | Telegram + Discord |
-| **Extended Report** | 6-hour detailed report with uptime | Telegram + Discord |
+| **Node Down** | Can't reach metrics or blocks stopped | Telegram + Pushover + Discord + Slack |
+| **High Resources (Critical)** | CPU/RAM/Disk ≥ 95% | Telegram + Pushover + Discord + Slack |
+| **High Resources (Warning)** | CPU/RAM/Disk ≥ 90% | Telegram + Discord + Slack |
+| **Active Set Changes** | Enters or leaves active set | Telegram + Discord + Slack |
+| **Recovery** | Validator back online | Telegram + Discord + Slack |
+| **Extended Report** | 6-hour detailed report with uptime | Telegram + Discord + Slack |
 
 **Alert Priority:**
-- **CRITICAL** → Telegram + Pushover + Discord (bypasses rate limits)
-- **WARNING** → Telegram + Discord (rate limited)
-- **INFO** → Telegram + Discord (rate limited)
+- **CRITICAL** → Telegram + Pushover + Discord + Slack (bypasses rate limits)
+- **WARNING** → Telegram + Discord + Slack (rate limited)
+- **INFO** → Telegram + Discord + Slack (rate limited)
 
 > **Notes:**
+> - All channels are optional — configure any combination
 > - Pushover: Only CRITICAL alerts (emergency channel), 30-minute cooldown per validator
-> - Discord: Optional, receives ALL alerts if configured (same as Telegram)
+> - Discord/Slack: Optional, receives ALL alerts if configured
 
 ---
 
@@ -105,7 +108,8 @@ You should get a **"Monad Monitor Started"** message on Telegram.
 
 - **2 servers:** One for your validator, one for monitoring (can be a cheap VPS)
 - **Telegram bot** (free, takes 2 minutes)
-- **Discord webhook** (optional ,free, takes 2 minutes)
+- **Discord webhook** (optional, free, takes 2 minutes)
+- **Slack webhook** (optional, free, takes 2 minutes)
 - **Pushover** (optional but recommended, for emergency alerts that bypass DND)
 
 ---
@@ -226,12 +230,15 @@ nano .env
 
 | Variable | Required | Description |
 |----------|:--------:|-------------|
-| `TELEGRAM_TOKEN` | **Yes** | Bot token from @BotFather |
-| `TELEGRAM_CHAT_ID` | **Yes** | Your chat ID for alerts |
+| `TELEGRAM_TOKEN` | No | Bot token from @BotFather |
+| `TELEGRAM_CHAT_ID` | No | Your chat ID for alerts |
 | `PUSHOVER_USER_KEY` | No | For emergency alerts |
 | `PUSHOVER_APP_TOKEN` | No | From pushover.net |
 | `DISCORD_WEBHOOK_URL` | No | Discord webhook URL |
+| `SLACK_WEBHOOK_URL` | No | Slack incoming webhook URL |
 | `TZ` | No | Timezone (default: UTC) |
+
+> At least one alert channel must be configured.
 
 Save: `Ctrl+O`, Exit: `Ctrl+X`
 
@@ -463,7 +470,7 @@ micto-monad-monitor/
 │   └── triedb-collector.sh  # TrieDB metrics (run on validator)
 └── monad_monitor/
     ├── main.py            # Entry point
-    ├── alerts.py          # Telegram, Pushover, Discord
+    ├── alerts.py          # Telegram, Pushover, Discord, Slack
     ├── dashboard_server.py # Web dashboard (:8282)
     ├── health_server.py   # Health API (:8181)
     └── static/            # Dashboard frontend
