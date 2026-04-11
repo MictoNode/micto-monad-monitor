@@ -62,7 +62,11 @@ class DashboardServer:
         with open(index_path, "r", encoding="utf-8") as f:
             content = f.read()
 
-        return web.Response(text=content, content_type="text/html")
+        return web.Response(
+            text=content,
+            content_type="text/html",
+            headers={"Cache-Control": "no-cache"},
+        )
 
     async def _get_health(self, request: web.Request) -> web.Response:
         """Return JSON with validator data for dashboard consumption"""
@@ -85,7 +89,11 @@ class DashboardServer:
         with open(css_path, "r", encoding="utf-8") as f:
             content = f.read()
 
-        return web.Response(text=content, content_type="text/css")
+        return web.Response(
+            text=content,
+            content_type="text/css",
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
 
     async def _get_app_js(self, request: web.Request) -> web.Response:
         """Serve app.js"""
@@ -96,7 +104,11 @@ class DashboardServer:
         with open(js_path, "r", encoding="utf-8") as f:
             content = f.read()
 
-        return web.Response(text=content, content_type="application/javascript")
+        return web.Response(
+            text=content,
+            content_type="application/javascript",
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
 
     def update_validators(
         self,
