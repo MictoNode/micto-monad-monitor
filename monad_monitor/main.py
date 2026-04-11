@@ -268,7 +268,6 @@ def main():
                         debug(
                             f"Huginn [{validator.name}]: is_active={h.get('is_active')}, "
                             f"is_ever_active={h.get('is_ever_active')}, "
-                            f"round_diff={h.get('round_diff')}, "
                             f"uptime={h.get('uptime_percent')}%, "
                             f"total_events={h.get('total_events')}"
                         )
@@ -297,7 +296,7 @@ def main():
                         transition = state_machine.update(
                             is_active=is_active if is_active is not None else False,
                             is_ever_active=is_ever_active,
-                            metadata={"round_diff": health_status.huginn_data.get("round_diff")} if health_status.huginn_data else {}
+                            metadata={}
                         )
 
                     # Handle state transitions with alerts (Telegram + Discord)
@@ -456,7 +455,7 @@ def main():
                     if health_status.huginn_data:
                         h = health_status.huginn_data
                         debug(
-                            f"Huginn [{validator.name}]: round_diff={h.get('round_diff')}, "
+                            f"Huginn [{validator.name}]: "
                             f"uptime={h.get('uptime_percent')}%, total_events={h.get('total_events')}"
                         )
                 else:

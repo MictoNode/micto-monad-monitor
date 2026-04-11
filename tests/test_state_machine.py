@@ -35,12 +35,11 @@ class TestStateTransition:
             to_state=ValidatorState.ACTIVE,
             validator_name="TestValidator",
             timestamp=1234567890.0,
-            metadata={"round_diff": 5}
+            metadata={}
         )
         assert transition.from_state == ValidatorState.NEW
         assert transition.to_state == ValidatorState.ACTIVE
         assert transition.validator_name == "TestValidator"
-        assert transition.metadata["round_diff"] == 5
 
     def test_is_significant_transition_new_to_active(self):
         """Test NEW -> ACTIVE is significant"""
@@ -101,7 +100,7 @@ class TestStateTransition:
             to_state=ValidatorState.INACTIVE,
             validator_name="MyValidator",
             timestamp=0.0,
-            metadata={"round_diff": 15000}
+            metadata={}
         )
         msg = transition.get_alert_message()
         assert "MyValidator" in msg

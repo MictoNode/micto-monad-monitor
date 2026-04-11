@@ -501,8 +501,6 @@
             huginn ? formatNumber(huginn.finalized_count) : '--');
         setTextSafe(card, '.detail-timeouts',
             huginn ? formatNumber(huginn.timeout_count) : '--');
-        setTextSafe(card, '.detail-round-diff',
-            huginn ? formatNumber(huginn.round_diff) : '--');
 
         // RPC health
         setTextSafe(card, '.detail-rpc',

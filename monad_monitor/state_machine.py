@@ -48,8 +48,6 @@ class StateTransition:
         elif self.from_state == ValidatorState.ACTIVE and self.to_state == ValidatorState.INACTIVE:
             msg = f"⚪ *{self.validator_name} LEFT ACTIVE SET*\n\n"
             msg += "Validator is no longer in the active set.\n"
-            if "round_diff" in self.metadata:
-                msg += f"Round difference: {self.metadata['round_diff']}\n"
             msg += "Block production alerts disabled until re-entry."
             return msg
 

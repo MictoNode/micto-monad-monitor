@@ -34,42 +34,9 @@ SAMPLE_INACTIVE_VALIDATOR_RESPONSE = {
     "since_utc": None,
 }
 
-# Reference validator response (for network round)
-SAMPLE_REFERENCE_VALIDATOR_RESPONSE = {
-    "validator_id": 1,
-    "validator_name": "Monad Foundation",
-    "finalized_count": 10000,
-    "timeout_count": 0,
-    "total_events": 10000,
-    "last_round": 51712837,
-    "last_block_height": 12345678,
-    "since_utc": "2024-01-01T00:00:00Z",
-}
-
 # Endpoint URLs
 TESTNET_API = "https://validator-api-testnet.huginn.tech/monad-api"
 MAINNET_API = "https://validator-api.huginn.tech/monad-api"
-
-
-def mock_reference_validators(rsps, base_url, network_round=51712837):
-    """
-    Helper to mock reference validator responses for multi-validator strategy.
-
-    The client queries TOP 5 validators by stake (IDs 1-5) to get network round.
-    We mock at least one successful response.
-    """
-    response = {
-        "success": True,
-        "uptime": {**SAMPLE_REFERENCE_VALIDATOR_RESPONSE, "last_round": network_round}
-    }
-    # Mock all 5 reference validators (IDs 1-5)
-    for ref_id in range(1, 6):
-        rsps.add(
-            responses.GET,
-            f"{base_url}/validator/uptime/{ref_id}",
-            json=response,
-            status=200,
-        )
 
 
 class TestCircuitBreaker:
@@ -203,9 +170,6 @@ class TestHuginnClientMultiNetwork:
         secp = "0x1234567890abcdef"
 
         with responses.RequestsMock() as rsps:
-            # Mock reference validators for network round
-            mock_reference_validators(rsps, TESTNET_API)
-
             # Mock the target validator
             rsps.add(
                 responses.GET,
@@ -225,9 +189,6 @@ class TestHuginnClientMultiNetwork:
         secp = "0xabcdef1234567890"
 
         with responses.RequestsMock() as rsps:
-            # Mock reference validators for mainnet
-            mock_reference_validators(rsps, MAINNET_API)
-
             # Mock the target validator
             rsps.add(
                 responses.GET,
@@ -246,9 +207,6 @@ class TestHuginnClientMultiNetwork:
         secp = "0xdefaultnetwork"
 
         with responses.RequestsMock() as rsps:
-            # Mock reference validators for testnet
-            mock_reference_validators(rsps, TESTNET_API)
-
             # Mock the target validator
             rsps.add(
                 responses.GET,
@@ -266,10 +224,6 @@ class TestHuginnClientMultiNetwork:
         secp = "0xsameaddress"
 
         with responses.RequestsMock() as rsps:
-            # Mock reference validators for both networks
-            mock_reference_validators(rsps, TESTNET_API, network_round=100)
-            mock_reference_validators(rsps, MAINNET_API, network_round=200)
-
             # Mock both endpoints with different responses
             rsps.add(
                 responses.GET,
@@ -297,13 +251,10 @@ class TestHuginnClientMultiNetwork:
             assert testnet_cached.total_events == 100
 
     def test_inactive_validator_detection(self, client):
-        """Validator with total_events=0 should be marked inactive"""
+        """Validator with status=inactive should be marked inactive"""
         secp = "0xinactive"
 
         with responses.RequestsMock() as rsps:
-            # Mock reference validators
-            mock_reference_validators(rsps, TESTNET_API)
-
             rsps.add(
                 responses.GET,
                 f"{TESTNET_API}/validator/uptime/{secp}",
@@ -318,13 +269,10 @@ class TestHuginnClientMultiNetwork:
             assert result.total_events == 0
 
     def test_active_validator_detection(self, client):
-        """Validator with total_events>0 should be marked active"""
+        """Validator with status=active should be marked active"""
         secp = "0xactive"
 
         with responses.RequestsMock() as rsps:
-            # Mock reference validators
-            mock_reference_validators(rsps, TESTNET_API)
-
             rsps.add(
                 responses.GET,
                 f"{TESTNET_API}/validator/uptime/{secp}",
@@ -343,9 +291,6 @@ class TestHuginnClientMultiNetwork:
         secp = "0xratelimit"
 
         with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
-            # Mock reference validators
-            mock_reference_validators(rsps, TESTNET_API)
-
             # First request succeeds
             rsps.add(
                 responses.GET,
@@ -363,9 +308,6 @@ class TestHuginnClientMultiNetwork:
         client._cache_times[cache_key] = 0
 
         with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
-            # Mock reference validators
-            mock_reference_validators(rsps, TESTNET_API)
-
             # Second request gets rate limited
             rsps.add(
                 responses.GET,
@@ -384,9 +326,6 @@ class TestHuginnClientMultiNetwork:
         secp = "0xnetworkerror"
 
         with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
-            # Mock reference validators
-            mock_reference_validators(rsps, TESTNET_API)
-
             # First request succeeds
             rsps.add(
                 responses.GET,
@@ -403,9 +342,6 @@ class TestHuginnClientMultiNetwork:
         client._cache_times[cache_key] = 0
 
         with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
-            # Mock reference validators
-            mock_reference_validators(rsps, TESTNET_API)
-
             # Second request fails with connection error
             rsps.add(
                 responses.GET,
@@ -422,9 +358,6 @@ class TestHuginnClientMultiNetwork:
         secp = "0xcachetest"
 
         with responses.RequestsMock() as rsps:
-            # Mock reference validators
-            mock_reference_validators(rsps, TESTNET_API)
-
             rsps.add(
                 responses.GET,
                 f"{TESTNET_API}/validator/uptime/{secp}",
@@ -447,9 +380,6 @@ class TestHuginnClientMultiNetwork:
         secp = "0xactivewrapper"
 
         with responses.RequestsMock() as rsps:
-            # Mock reference validators
-            mock_reference_validators(rsps, TESTNET_API)
-
             rsps.add(
                 responses.GET,
                 f"{TESTNET_API}/validator/uptime/{secp}",
@@ -551,9 +481,6 @@ class TestHuginnClientCacheOperations:
         secp = "0xcacheclear"
 
         with responses.RequestsMock() as rsps:
-            # Mock reference validators
-            mock_reference_validators(rsps, TESTNET_API)
-
             rsps.add(
                 responses.GET,
                 f"{TESTNET_API}/validator/uptime/{secp}",
@@ -578,9 +505,6 @@ class TestHuginnClientCacheOperations:
         secp = "0xcacheage"
 
         with responses.RequestsMock() as rsps:
-            # Mock reference validators
-            mock_reference_validators(rsps, TESTNET_API)
-
             rsps.add(
                 responses.GET,
                 f"{TESTNET_API}/validator/uptime/{secp}",
@@ -601,251 +525,12 @@ class TestHuginnClientCacheOperations:
         assert age is None
 
 
-class TestGmonadsBackedValidatorSelection:
-    """Test cases for gmonads-backed active validator selection (rate limit optimization)"""
+class TestStatusFieldDetection:
+    """Test cases for active set detection from API status field only
 
-    @pytest.fixture
-    def huginn_client(self):
-        """Create HuginnClient for testing"""
-        return HuginnClient(config=HuginnConfig())
-
-    @pytest.fixture
-    def gmonads_client(self):
-        """Create GmonadsClient for testing"""
-        from monad_monitor.gmonads import GmonadsConfig, GmonadsClient
-        return GmonadsClient(config=GmonadsConfig())
-
-    def test_uses_gmonads_active_validator_when_available(self, huginn_client, gmonads_client):
-        """When gmonads provides an active validator, should query only that single validator from Huginn"""
-        secp = "0xgmonadsactive"
-
-        with responses.RequestsMock() as rsps:
-            # Mock gmonads to return validators with active one having val_index=42
-            rsps.add(
-                responses.GET,
-                "https://www.gmonads.com/api/v1/public/validators/epoch",
-                json={
-                    "success": True,
-                    "data": [
-                        {"node_id": "02abc", "val_index": 42, "stake": "1000000", "commission": 0.05, "validator_set_type": "active"},
-                        {"node_id": "03def", "val_index": 10, "stake": "500000", "commission": 0.10, "validator_set_type": "inactive"},
-                    ],
-                },
-                status=200,
-            )
-
-            # Mock Huginn - only validator ID 42 should be queried (the active one from gmonads)
-            rsps.add(
-                responses.GET,
-                f"{TESTNET_API}/validator/uptime/42",
-                json={"success": True, "uptime": {"last_round": 51712837}},
-                status=200,
-            )
-
-            # Mock target validator
-            rsps.add(
-                responses.GET,
-                f"{TESTNET_API}/validator/uptime/{secp}",
-                json=SAMPLE_ACTIVE_VALIDATOR_RESPONSE,
-                status=200,
-            )
-
-            result = huginn_client.get_validator_uptime(secp, network="testnet", gmonads_client=gmonads_client)
-
-            assert result is not None
-            assert result.current_network_round == 51712837
-            # Verify only 1 Huginn call was made for network round (not 5)
-            # The responses library will fail if more calls are made than mocked
-
-    def test_fallback_to_multi_validator_when_gmonads_fails(self, huginn_client, gmonads_client):
-        """When gmonads fails, should fallback to multi-validator strategy"""
-        secp = "0xfallbacktest"
-
-        with responses.RequestsMock() as rsps:
-            # Mock gmonads to fail
-            rsps.add(
-                responses.GET,
-                "https://www.gmonads.com/api/v1/public/validators/epoch",
-                body=responses.ConnectionError("gmonads down"),
-            )
-
-            # Mock reference validators (multi-validator fallback)
-            mock_reference_validators(rsps, TESTNET_API, network_round=51712837)
-
-            # Mock target validator
-            rsps.add(
-                responses.GET,
-                f"{TESTNET_API}/validator/uptime/{secp}",
-                json=SAMPLE_ACTIVE_VALIDATOR_RESPONSE,
-                status=200,
-            )
-
-            result = huginn_client.get_validator_uptime(secp, network="testnet", gmonads_client=gmonads_client)
-
-            assert result is not None
-            assert result.current_network_round == 51712837
-
-    def test_fallback_to_multi_validator_when_no_active_validators(self, huginn_client, gmonads_client):
-        """When gmonads returns no active validators, should fallback to multi-validator strategy"""
-        secp = "0xnoactive"
-
-        with responses.RequestsMock() as rsps:
-            # Mock gmonads to return only inactive validators
-            rsps.add(
-                responses.GET,
-                "https://www.gmonads.com/api/v1/public/validators/epoch",
-                json={
-                    "success": True,
-                    "data": [
-                        {"node_id": "02abc", "val_index": 1, "stake": "1000000", "commission": 0.05, "validator_set_type": "inactive"},
-                    ],
-                },
-                status=200,
-            )
-
-            # Mock reference validators (multi-validator fallback)
-            mock_reference_validators(rsps, TESTNET_API, network_round=51712837)
-
-            # Mock target validator
-            rsps.add(
-                responses.GET,
-                f"{TESTNET_API}/validator/uptime/{secp}",
-                json=SAMPLE_ACTIVE_VALIDATOR_RESPONSE,
-                status=200,
-            )
-
-            result = huginn_client.get_validator_uptime(secp, network="testnet", gmonads_client=gmonads_client)
-
-            assert result is not None
-            assert result.current_network_round == 51712837
-
-    def test_no_gmonads_client_uses_multi_validator(self, huginn_client):
-        """When gmonads_client is not provided, should use multi-validator strategy"""
-        secp = "0xnogmonads"
-
-        with responses.RequestsMock() as rsps:
-            # Mock reference validators (multi-validator strategy)
-            mock_reference_validators(rsps, TESTNET_API, network_round=51712837)
-
-            # Mock target validator
-            rsps.add(
-                responses.GET,
-                f"{TESTNET_API}/validator/uptime/{secp}",
-                json=SAMPLE_ACTIVE_VALIDATOR_RESPONSE,
-                status=200,
-            )
-
-            # Call without gmonads_client
-            result = huginn_client.get_validator_uptime(secp, network="testnet", gmonads_client=None)
-
-            assert result is not None
-            assert result.current_network_round == 51712837
-
-
-class TestMultiValidatorStrategy:
-    """Test cases for multi-validator network round strategy"""
-
-    @pytest.fixture
-    def client(self):
-        """Create HuginnClient for testing"""
-        return HuginnClient(config=HuginnConfig())
-
-    def test_uses_max_round_from_reference_validators(self, client):
-        """Should use MAX round from successful reference validators"""
-        secp = "0xmaxroundtest"
-
-        with responses.RequestsMock() as rsps:
-            # Mock reference validators with different rounds
-            # ID 1: round 100
-            rsps.add(
-                responses.GET,
-                f"{TESTNET_API}/validator/uptime/1",
-                json={"success": True, "uptime": {"last_round": 100}},
-                status=200,
-            )
-            # ID 2: round 150 (MAX)
-            rsps.add(
-                responses.GET,
-                f"{TESTNET_API}/validator/uptime/2",
-                json={"success": True, "uptime": {"last_round": 150}},
-                status=200,
-            )
-            # ID 3: round 120
-            rsps.add(
-                responses.GET,
-                f"{TESTNET_API}/validator/uptime/3",
-                json={"success": True, "uptime": {"last_round": 120}},
-                status=200,
-            )
-            # ID 4-5: fail
-            rsps.add(
-                responses.GET,
-                f"{TESTNET_API}/validator/uptime/4",
-                json={"error": "not found"},
-                status=404,
-            )
-            rsps.add(
-                responses.GET,
-                f"{TESTNET_API}/validator/uptime/5",
-                json={"error": "not found"},
-                status=404,
-            )
-
-            # Mock target validator with round 145 (within threshold of 150)
-            rsps.add(
-                responses.GET,
-                f"{TESTNET_API}/validator/uptime/{secp}",
-                json={**SAMPLE_ACTIVE_VALIDATOR_RESPONSE, "last_round": 145},
-                status=200,
-            )
-
-            result = client.get_validator_uptime(secp, network="testnet")
-
-            assert result is not None
-            assert result.current_network_round == 150
-            assert result.round_diff == 5  # 150 - 145
-
-    def test_fallback_to_cached_round_on_all_failures(self, client):
-        """Should use cached round when all reference validators fail"""
-        secp = "0xfallbacktest"
-
-        # Clear circuit breaker to ensure test starts fresh
-        client._circuit_breakers.clear()
-
-        # Set up a cached round
-        client._network_rounds["testnet"] = 500
-        client._network_round_times["testnet"] = time.time() - 1000  # Old cache
-
-        with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
-            # All reference validators fail with 404 (not retried, doesn't trigger circuit breaker)
-            for ref_id in range(1, 6):
-                rsps.add(
-                    responses.GET,
-                    f"{TESTNET_API}/validator/uptime/{ref_id}",
-                    json={"error": "not found"},
-                    status=404,
-                )
-
-            # Mock target validator
-            rsps.add(
-                responses.GET,
-                f"{TESTNET_API}/validator/uptime/{secp}",
-                json={**SAMPLE_ACTIVE_VALIDATOR_RESPONSE, "last_round": 450},
-                status=200,
-            )
-
-            result = client.get_validator_uptime(secp, network="testnet")
-
-            # Should use cached round (500)
-            assert result is not None
-            assert result.current_network_round == 500
-
-
-class TestIsActiveFallbackSafety:
-    """Test cases for safe fallback when network round unavailable (Season 5.2)
-
-    When network round cannot be fetched, the system should NOT assume is_active=True.
-    Instead, it should use a more conservative approach with confidence indicators.
+    Active set status is determined solely from the Huginn API's "status" field.
+    When the status field is missing, is_active is None, which triggers
+    gmonads fallback in metrics.py.
     """
 
     @pytest.fixture
@@ -853,22 +538,47 @@ class TestIsActiveFallbackSafety:
         """Create HuginnClient for testing"""
         return HuginnClient(config=HuginnConfig())
 
-    def test_unknown_active_status_when_no_network_round_and_no_status(self, client):
-        """When status field missing and network round unavailable, should not assume active"""
-        secp = "0xunknownstatus"
+    def test_active_from_status_field(self, client):
+        """When API returns status='active', is_active should be True"""
+        secp = "0xstatusactive"
+
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.GET,
+                f"{TESTNET_API}/validator/uptime/{secp}",
+                json=SAMPLE_ACTIVE_VALIDATOR_RESPONSE,  # has "status": "active"
+                status=200,
+            )
+
+            result = client.get_validator_uptime(secp, network="testnet")
+
+            assert result is not None
+            assert result.is_active is True
+
+    def test_inactive_from_status_field(self, client):
+        """When API returns status='inactive', is_active should be False"""
+        secp = "0xstatusinactive"
+
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.GET,
+                f"{TESTNET_API}/validator/uptime/{secp}",
+                json=SAMPLE_INACTIVE_VALIDATOR_RESPONSE,  # has "status": "inactive"
+                status=200,
+            )
+
+            result = client.get_validator_uptime(secp, network="testnet")
+
+            assert result is not None
+            assert result.is_active is False
+
+    def test_none_when_status_missing(self, client):
+        """When API response has no status field, is_active should be None (triggers gmonads fallback)"""
+        secp = "0xnostatus"
         client._circuit_breakers.clear()
 
         with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
-            # All reference validators fail with 404
-            for ref_id in range(1, 6):
-                rsps.add(
-                    responses.GET,
-                    f"{TESTNET_API}/validator/uptime/{ref_id}",
-                    json={"error": "not found"},
-                    status=404,
-                )
-
-            # Mock target validator WITHOUT status field (old API or edge case)
+            # Mock target validator WITHOUT status field
             rsps.add(
                 responses.GET,
                 f"{TESTNET_API}/validator/uptime/{secp}",
@@ -891,74 +601,5 @@ class TestIsActiveFallbackSafety:
 
             assert result is not None
             assert result.is_ever_active is True
-            # No status field + no network round = conservative False
-            assert result.is_active is False
-            assert result.confidence == "unknown"
-            assert result.round_diff is None
-
-    def test_high_confidence_when_round_available(self, client):
-        """When network round is available, confidence should be 'high'"""
-        secp = "0xhighconf"
-        client._circuit_breakers.clear()
-
-        with responses.RequestsMock() as rsps:
-            mock_reference_validators(rsps, TESTNET_API, network_round=1000)
-
-            rsps.add(
-                responses.GET,
-                f"{TESTNET_API}/validator/uptime/{secp}",
-                json={**SAMPLE_ACTIVE_VALIDATOR_RESPONSE, "last_round": 990},
-                status=200,
-            )
-
-            result = client.get_validator_uptime(secp, network="testnet")
-
-            assert result is not None
-            assert result.is_active is True
-            assert result.confidence == "high"
-            assert result.round_diff == 10
-
-    def test_uses_cached_round_with_medium_confidence(self, client):
-        """When status field missing and using cached round, confidence should be 'medium'"""
-        secp = "0xcachedconf"
-        client._circuit_breakers.clear()
-
-        # Set up cached round
-        client._network_rounds["testnet"] = 2000
-        client._network_round_times["testnet"] = time.time() - 200  # Slightly old
-
-        with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
-            # All reference validators fail
-            for ref_id in range(1, 6):
-                rsps.add(
-                    responses.GET,
-                    f"{TESTNET_API}/validator/uptime/{ref_id}",
-                    json={"error": "unavailable"},
-                    status=500,
-                )
-
-            # Mock target validator WITHOUT status field — force round-based fallback
-            rsps.add(
-                responses.GET,
-                f"{TESTNET_API}/validator/uptime/{secp}",
-                json={
-                    "validator_id": 88,
-                    "validator_name": "Cached Round Val",
-                    "secp_address": secp,
-                    # No "status" field — falls back to round difference
-                    "finalized_count": 100,
-                    "timeout_count": 0,
-                    "total_events": 100,
-                    "last_round": 1990,
-                    "last_block_height": 12345678,
-                    "since_utc": "2024-01-01T00:00:00Z",
-                },
-                status=200,
-            )
-
-            result = client.get_validator_uptime(secp, network="testnet")
-
-            assert result is not None
-            assert result.current_network_round == 2000  # From cache
-            assert result.confidence == "medium"  # Cached round fallback
-            assert result.is_active is True  # round_diff = 10, within threshold
+            # No status field = None (triggers gmonads fallback in metrics.py)
+            assert result.is_active is None

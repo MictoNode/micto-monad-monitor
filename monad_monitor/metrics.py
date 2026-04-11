@@ -340,21 +340,29 @@ class MetricsScraper:
                 validator_secp, network=network, gmonads_client=gmonads_client
             )
             if uptime:
-                return {
-                    "is_active": uptime.is_active,
-                    "reason": (
-                        f"Verified via Huginn API: {uptime.total_events} events, "
-                        f"{uptime.uptime_percent}% uptime"
-                    ),
-                    "source": "huginn_api",
-                    "uptime_percent": uptime.uptime_percent,
-                    "finalized_count": uptime.finalized_count,
-                    "timeout_count": uptime.timeout_count,
-                    "total_events": uptime.total_events,
-                    "last_round": uptime.last_round,
-                    "last_block_height": uptime.last_block_height,
-                    "huginn_data": uptime.to_dict(),
-                }
+                # If Huginn provided a definitive status (is_active is not None), use it
+                if uptime.is_active is not None:
+                    return {
+                        "is_active": uptime.is_active,
+                        "reason": (
+                            f"Verified via Huginn API: {uptime.total_events} events, "
+                            f"{uptime.uptime_percent}% uptime"
+                        ),
+                        "source": "huginn_api",
+                        "uptime_percent": uptime.uptime_percent,
+                        "finalized_count": uptime.finalized_count,
+                        "timeout_count": uptime.timeout_count,
+                        "total_events": uptime.total_events,
+                        "last_round": uptime.last_round,
+                        "last_block_height": uptime.last_block_height,
+                        "huginn_data": uptime.to_dict(),
+                    }
+                else:
+                    # Huginn status field missing — fall back to gmonads
+                    logger.info(
+                        f"Huginn status field missing for {validator_secp[:16]}..., "
+                        f"falling back to gmonads"
+                    )
 
         # Fallback 1: Try gmonads API for active set verification
         # This is more reliable than local inference when Huginn is unavailable
