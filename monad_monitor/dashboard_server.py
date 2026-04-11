@@ -70,8 +70,8 @@ class DashboardServer:
             data = {
                 "status": self._monitor_status,
                 "uptime_seconds": round(self._uptime_seconds, 2),
-                "validators": dict(self._validators_data),
                 "version": self._version,
+                "validators": dict(self._validators_data),
             }
 
         return web.json_response(data)

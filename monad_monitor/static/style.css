@@ -1,5 +1,5 @@
 /* Monad Validator Monitor - Dashboard Styles
- * Professional, clean design with Monad brand identity
+ * Clean, professional blockchain monitoring aesthetic
  * Brand colors: Purple #836EF9, Dark #0E091C, Cyan #85E6FF
  * Responsive: 2K, 1080p, Tablet, Mobile
  */
@@ -81,6 +81,20 @@
 }
 
 /* ============================================
+   Keyframe Animations
+   ============================================ */
+
+@keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+@keyframes connection-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* ============================================
    Reset & Base Styles
    ============================================ */
 
@@ -111,31 +125,20 @@ body {
 }
 
 /* ============================================
-   Dashboard Container
-   ============================================ */
-.dashboard {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 0 var(--space-4);
-    width: 100%;
-}
-
-/* ============================================
    Header
    ============================================ */
 .header {
     border-bottom: 1px solid var(--border-default);
     position: sticky;
     top: 0;
-    background-color: var(--bg-primary);
+    background: var(--bg-primary);
     z-index: 100;
-    backdrop-filter: blur(8px);
     width: 100%;
 }
 
 .header-content {
     display: flex;
-    justify-content: center;
+    justify-content: space-between;
     align-items: center;
     gap: var(--space-4);
     max-width: 1200px;
@@ -155,6 +158,7 @@ body {
     align-items: center;
     justify-content: center;
     transition: transform var(--transition-normal);
+    filter: drop-shadow(0 0 8px rgba(131, 110, 249, 0.4));
 }
 
 .logo-icon:hover {
@@ -182,47 +186,112 @@ body {
     letter-spacing: 0.02em;
 }
 
-.header-meta {
+.header-right {
     display: flex;
     align-items: center;
     gap: var(--space-3);
 }
 
-.network-badge {
+/* ============================================
+   Connection Indicator
+   ============================================ */
+.connection-indicator {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.connection-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    transition: background-color var(--transition-normal), box-shadow var(--transition-normal);
+}
+
+.connection-dot.connected {
+    background-color: var(--status-active);
+    box-shadow: 0 0 6px var(--status-active);
+}
+
+.connection-dot.disconnected {
+    background-color: var(--status-critical);
+    box-shadow: 0 0 6px var(--status-critical);
+}
+
+#connection-status {
     font-family: var(--font-mono);
-    font-size: 0.6875rem;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+/* ============================================
+   Summary Bar
+   ============================================ */
+.summary-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-6);
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: var(--space-4) var(--space-6);
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-default);
+    border-top: none;
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    flex-wrap: wrap;
+}
+
+.summary-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-1);
+    min-width: 60px;
+}
+
+.summary-stat-value {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-lg);
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.2;
+}
+
+.summary-stat--active { color: var(--status-active); }
+.summary-stat--warning { color: var(--status-warning); }
+.summary-stat--critical { color: var(--status-critical); }
+
+.summary-stat-label {
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
     font-weight: 500;
-    padding: var(--space-1) var(--space-2);
-    border-radius: var(--radius-sm);
-    text-transform: capitalize;
-    letter-spacing: 0.02em;
-}
-
-.network-badge.testnet {
-    background-color: var(--status-active-bg);
-    color: var(--network-testnet);
-    border: 1px solid rgba(133, 230, 255, 0.2);
-}
-
-.network-badge.mainnet {
-    background-color: var(--monad-purple-muted);
-    color: var(--network-mainnet);
-    border: 1px solid rgba(131, 110, 249, 0.2);
-}
-
-.version {
-    font-family: var(--font-mono);
-    font-size: 0.6875rem;
     color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.summary-divider {
+    width: 1px;
+    height: 32px;
+    background: var(--border-default);
+    flex-shrink: 0;
+}
+
+/* ============================================
+   Dashboard Container
+   ============================================ */
+.dashboard {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 var(--space-4);
+    width: 100%;
+    flex: 1;
 }
 
 /* ============================================
    Main Content
    ============================================ */
-.dashboard {
-    flex: 1;
-}
-
 .main-content {
     padding: var(--space-6) var(--space-4);
     display: flex;
@@ -249,11 +318,6 @@ body {
     width: 100%;
 }
 
-/* Legend section - match single validator width using :has() selector */
-.main-content:has(.validators-container.has-single-validator) .legend-section {
-    max-width: 600px;
-}
-
 /* ============================================
    Validator Card
    ============================================ */
@@ -261,7 +325,7 @@ body {
     background-color: var(--bg-card);
     border: 1px solid var(--border-default);
     border-radius: var(--radius-md);
-    padding: var(--space-4);
+    padding: 1.5rem 1.25rem;
     transition:
         border-color var(--transition-normal),
         background-color var(--transition-normal),
@@ -302,7 +366,14 @@ body {
     outline-offset: 2px;
 }
 
-/* Card Header */
+/* Card Accent (hidden) */
+.card-accent {
+    display: none;
+}
+
+/* ============================================
+   Card Header
+   ============================================ */
 .card-header {
     display: flex;
     justify-content: space-between;
@@ -320,22 +391,26 @@ body {
     flex: 1;
 }
 
+/* ============================================
+   Validator Indicator
+   ============================================ */
 .validator-indicator {
     width: 10px;
     height: 10px;
     border-radius: 50%;
     background-color: var(--status-inactive);
     flex-shrink: 0;
-    transition: box-shadow var(--transition-normal);
+    transition: box-shadow var(--transition-normal), background-color var(--transition-normal);
 }
 
 .validator-indicator.active {
     background-color: var(--status-active);
-    box-shadow: 0 0 8px var(--status-active);
+    box-shadow: 0 0 6px var(--status-active);
 }
 
 .validator-indicator.warning {
     background-color: var(--status-warning);
+    box-shadow: 0 0 6px var(--status-warning);
 }
 
 .validator-indicator.inactive {
@@ -344,9 +419,12 @@ body {
 
 .validator-indicator.critical {
     background-color: var(--status-critical);
-    box-shadow: 0 0 8px var(--status-critical);
+    box-shadow: 0 0 6px var(--status-critical);
 }
 
+/* ============================================
+   Validator Name
+   ============================================ */
 .validator-name {
     font-family: var(--font-display);
     font-weight: 600;
@@ -357,6 +435,9 @@ body {
     text-overflow: ellipsis;
 }
 
+/* ============================================
+   Network Badge (per-card)
+   ============================================ */
 .validator-network-badge {
     font-family: var(--font-mono);
     font-size: 0.625rem;
@@ -381,6 +462,9 @@ body {
     border: 1px solid rgba(131, 110, 249, 0.2);
 }
 
+/* ============================================
+   Status Badge (health: ACTIVE / WARNING / CRITICAL)
+   ============================================ */
 .validator-status-badge {
     font-family: var(--font-mono);
     font-size: 0.625rem;
@@ -412,13 +496,14 @@ body {
     color: var(--status-critical);
 }
 
-/* Card Metrics */
+/* ============================================
+   Card Metrics
+   ============================================ */
 .card-metrics {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: var(--space-3);
-    padding: var(--space-3) 0;
-    border-top: 1px solid var(--border-default);
+    padding-bottom: var(--space-3);
     border-bottom: 1px solid var(--border-default);
 }
 
@@ -457,13 +542,156 @@ body {
     font-weight: 600;
 }
 
-/* Card Footer */
+/* ============================================
+   Sparkline
+   ============================================ */
+.sparkline {
+    display: inline-block;
+    vertical-align: middle;
+    margin-left: var(--space-2);
+    opacity: 0.8;
+}
+
+/* ============================================
+   Resource Gauges
+   ============================================ */
+.card-resources {
+    display: flex;
+    gap: var(--space-4);
+    padding: var(--space-3) 0;
+    border-bottom: 1px solid var(--border-default);
+}
+
+.resource-gauge {
+    flex: 1;
+    min-width: 0;
+}
+
+.gauge-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-1);
+}
+
+.gauge-label {
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.gauge-value {
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.gauge-bar {
+    height: 4px;
+    background: var(--border-default);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.gauge-bar--wide {
+    height: 4px;
+}
+
+.gauge-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: var(--status-active);
+    transition: width 0.4s ease;
+    width: 0%;
+}
+
+.gauge-fill.gauge-warning {
+    background: var(--status-warning);
+}
+
+.gauge-fill.gauge-critical {
+    background: var(--status-critical);
+}
+
+/* ============================================
+   Expandable Details
+   ============================================ */
+.card-details {
+    padding: var(--space-3) 0;
+}
+
+.details-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-3);
+}
+
+.detail-item {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.detail-label {
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.detail-value {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.detail-triedb {
+    margin-top: var(--space-3);
+}
+
+.detail-triedb[hidden] {
+    display: none;
+}
+
+.detail-warnings {
+    margin-top: var(--space-3);
+}
+
+.detail-warnings[hidden] {
+    display: none;
+}
+
+.warnings-list {
+    margin-top: var(--space-2);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.warning-item {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--status-warning);
+    padding: var(--space-1) var(--space-2);
+    background: var(--status-warning-bg);
+    border-radius: var(--radius-sm);
+}
+
+/* ============================================
+   Card Footer
+   ============================================ */
 .card-footer {
     display: flex;
     align-items: center;
     gap: var(--space-1);
     margin-top: var(--space-3);
-    flex-wrap: wrap;
 }
 
 .last-check-label {
@@ -475,73 +703,6 @@ body {
 .last-check-time {
     font-family: var(--font-mono);
     font-size: 0.6875rem;
-    color: var(--text-secondary);
-}
-
-/* ============================================
-   Legend Section
-   ============================================ */
-.legend-section {
-    background-color: var(--bg-card);
-    border: 1px solid var(--border-default);
-    border-radius: var(--radius-md);
-    padding: var(--space-4);
-    max-width: var(--dashboard-max-width);
-    margin: 0 auto;
-    margin-top: var(--space-8);
-}
-
-.legend-title {
-    font-family: var(--font-mono);
-    font-size: 0.6875rem;
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    margin-bottom: var(--space-3);
-}
-
-.legend-items {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: var(--space-6);
-}
-
-.legend-item {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-}
-
-.legend-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-}
-
-.legend-dot--active {
-    background-color: var(--status-active);
-    box-shadow: 0 0 6px var(--status-active);
-}
-
-.legend-dot--warning {
-    background-color: var(--status-warning);
-}
-
-.legend-dot--inactive {
-    background-color: var(--status-inactive);
-}
-
-.legend-dot--critical {
-    background-color: var(--status-critical);
-}
-
-.legend-label {
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    font-weight: 500;
     color: var(--text-secondary);
 }
 
@@ -563,41 +724,6 @@ body {
     max-width: 1200px;
     margin: 0 auto;
     padding: var(--space-4) var(--space-6);
-}
-
-.footer-status {
-    display: flex;
-    align-items: center;
-    gap: var(--space-4);
-    flex-wrap: wrap;
-}
-
-.connection-indicator {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-}
-
-.connection-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    transition: background-color var(--transition-normal), box-shadow var(--transition-normal);
-}
-
-.connection-dot.connected {
-    background-color: var(--status-active);
-    box-shadow: 0 0 6px var(--status-active);
-}
-
-.connection-dot.disconnected {
-    background-color: var(--status-critical);
-}
-
-#connection-status {
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    color: var(--text-secondary);
 }
 
 .refresh-badge {
@@ -647,11 +773,6 @@ body {
     vertical-align: middle;
 }
 
-@keyframes shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
-}
-
 /* ============================================
    RESPONSIVE BREAKPOINTS
    ============================================ */
@@ -669,6 +790,20 @@ body {
 
     .header-content {
         padding: var(--space-6) var(--space-10);
+    }
+
+    .summary-bar {
+        max-width: 1400px;
+        padding: var(--space-5) var(--space-10);
+        gap: var(--space-8);
+    }
+
+    .summary-stat-value {
+        font-size: var(--font-size-xl);
+    }
+
+    .summary-stat-label {
+        font-size: 0.75rem;
     }
 
     .footer-content {
@@ -728,11 +863,6 @@ body {
         font-size: 0.9rem;
     }
 
-    /* Legend - match single validator width on 2K+ */
-    .main-content:has(.validators-container.has-single-validator) .legend-section {
-        max-width: 900px;
-    }
-
     .validator-card {
         padding: var(--space-6);
     }
@@ -754,21 +884,21 @@ body {
         font-size: 1rem;
     }
 
-    .legend-section {
-        padding: var(--space-6);
+    .gauge-label,
+    .gauge-value {
+        font-size: 0.6875rem;
     }
 
-    .legend-title {
-        font-size: 0.8125rem;
-        margin-bottom: var(--space-5);
+    .details-grid {
+        gap: var(--space-5);
     }
 
-    .legend-label {
+    .detail-label {
+        font-size: 0.6875rem;
+    }
+
+    .detail-value {
         font-size: 0.875rem;
-    }
-
-    .footer-status {
-        gap: var(--space-6);
     }
 
     #connection-status,
@@ -791,6 +921,10 @@ body {
 
     .header-content {
         padding: var(--space-5) var(--space-8);
+    }
+
+    .summary-bar {
+        max-width: 1000px;
     }
 
     .footer-content {
@@ -822,11 +956,6 @@ body {
         font-size: 1.125rem;
     }
 
-    /* Legend - match single validator width on 1080p */
-    .main-content:has(.validators-container.has-single-validator) .legend-section {
-        max-width: 700px;
-    }
-
     .logo-icon svg {
         width: 44px;
         height: 44px;
@@ -844,6 +973,10 @@ body {
     }
 
     .dashboard {
+        max-width: 960px;
+    }
+
+    .summary-bar {
         max-width: 960px;
     }
 
@@ -865,6 +998,15 @@ body {
 
     .header-content {
         padding: var(--space-4) var(--space-5);
+    }
+
+    .summary-bar {
+        gap: var(--space-4);
+        padding: var(--space-3) var(--space-5);
+    }
+
+    .summary-stat-value {
+        font-size: var(--font-size-base);
     }
 
     .footer-content {
@@ -895,13 +1037,9 @@ body {
         font-size: 0.5625rem;
     }
 
-    /* Footer responsive */
-    .footer-status {
-        width: auto;
-    }
-
-    .footer-credit {
-        text-align: center;
+    /* Details grid */
+    .details-grid {
+        grid-template-columns: repeat(3, 1fr);
     }
 }
 
@@ -913,6 +1051,23 @@ body {
 
     .header-content {
         padding: var(--space-4);
+    }
+
+    .summary-bar {
+        gap: var(--space-3);
+        padding: var(--space-3) var(--space-4);
+    }
+
+    .summary-stat-value {
+        font-size: var(--font-size-base);
+    }
+
+    .summary-stat {
+        min-width: 48px;
+    }
+
+    .summary-divider {
+        height: 24px;
     }
 
     .footer-content {
@@ -936,9 +1091,8 @@ body {
         grid-template-columns: repeat(4, 1fr);
     }
 
-    .legend-items {
-        justify-content: center;
-        gap: var(--space-4);
+    .details-grid {
+        grid-template-columns: repeat(3, 1fr);
     }
 }
 
@@ -950,6 +1104,27 @@ body {
 
     .header-content {
         padding: var(--space-3);
+    }
+
+    .summary-bar {
+        gap: var(--space-3);
+        padding: var(--space-3) var(--space-4);
+        border-radius: 0 0 var(--radius-md) var(--radius-md);
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
+    .summary-stat {
+        min-width: 48px;
+    }
+
+    .summary-stat-value {
+        font-size: 0.875rem;
+    }
+
+    .summary-divider {
+        width: 100%;
+        height: 1px;
     }
 
     .footer-content {
@@ -997,9 +1172,13 @@ body {
         font-size: 0.75rem;
     }
 
-    .legend-items {
-        justify-content: center;
-        gap: var(--space-4);
+    .card-resources {
+        flex-direction: column;
+        gap: var(--space-2);
+    }
+
+    .details-grid {
+        grid-template-columns: repeat(2, 1fr);
     }
 }
 
@@ -1011,6 +1190,28 @@ body {
 
     .header-content {
         padding: var(--space-2);
+    }
+
+    .summary-bar {
+        gap: var(--space-2);
+        padding: var(--space-2) var(--space-3);
+    }
+
+    .summary-stat {
+        min-width: 40px;
+    }
+
+    .summary-stat-value {
+        font-size: 0.8125rem;
+    }
+
+    .summary-stat-label {
+        font-size: 0.5rem;
+    }
+
+    .summary-divider {
+        width: 100%;
+        height: 1px;
     }
 
     .footer-content {
@@ -1044,13 +1245,6 @@ body {
         gap: var(--space-2);
     }
 
-    .validator-status-badge {
-        order: 3;
-        width: 100%;
-        text-align: center;
-        margin-top: var(--space-2);
-    }
-
     .card-metrics {
         grid-template-columns: 1fr 1fr;
         gap: var(--space-2);
@@ -1060,16 +1254,17 @@ body {
         font-size: 0.6875rem;
     }
 
-    .legend-section {
-        padding: var(--space-3);
+    .card-resources {
+        flex-direction: column;
+        gap: var(--space-2);
     }
 
-    .legend-items {
-        justify-content: center;
-        gap: var(--space-3);
+    .details-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--space-2);
     }
 
-    .legend-label {
+    .detail-value {
         font-size: 0.6875rem;
     }
 
@@ -1100,11 +1295,6 @@ body {
         justify-content: center;
     }
 
-    .legend-item {
-        min-height: 44px;
-        padding: var(--space-2);
-    }
-
     /* Remove hover effects on touch devices */
     .validator-card:hover {
         transform: none;
@@ -1125,6 +1315,11 @@ body {
 @media (max-height: 500px) and (orientation: landscape) {
     .header {
         padding: var(--space-2) 0;
+    }
+
+    .summary-bar {
+        padding: var(--space-2) var(--space-4);
+        gap: var(--space-3);
     }
 
     .main-content {
@@ -1158,6 +1353,7 @@ body {
 @media (prefers-contrast: high) {
     .validator-card {
         border-width: 2px;
+        border-color: var(--text-muted);
     }
 
     .validator-status-badge {
@@ -1166,6 +1362,14 @@ body {
 
     .validator-indicator {
         border: 1px solid currentColor;
+    }
+
+    .summary-bar {
+        border-width: 2px;
+    }
+
+    .card-accent {
+        height: 3px;
     }
 }
 
@@ -1194,11 +1398,30 @@ body {
         background: white;
     }
 
+    .summary-bar {
+        background: white;
+        border: 1px solid #ccc;
+    }
+
+    .summary-stat-value {
+        color: black;
+    }
+
+    .summary-stat-label {
+        color: #666;
+    }
+
     .validator-card {
         border: 1px solid #ccc;
         break-inside: avoid;
         box-shadow: none;
         page-break-inside: avoid;
+        background: white;
+    }
+
+    .card-accent {
+        print-color-adjust: exact;
+        -webkit-print-color-adjust: exact;
     }
 
     .connection-indicator,
@@ -1208,5 +1431,10 @@ body {
 
     .validators-container {
         grid-template-columns: repeat(2, 1fr);
+    }
+
+    .gauge-fill {
+        print-color-adjust: exact;
+        -webkit-print-color-adjust: exact;
     }
 }

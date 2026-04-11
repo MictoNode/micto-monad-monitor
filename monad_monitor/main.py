@@ -343,7 +343,31 @@ def main():
                     "huginn_data": health_status.huginn_data,
                     "last_check": time.time(),  # Timestamp for last check
                     "network": validator.network,  # Per-validator network
+                    "system_metrics": None,
+                    "block_production": None,
+                    "warnings": health_status.warnings or [],
+                    "criticals": health_status.criticals or [],
+                    "rpc_healthy": health_status.rpc_healthy if health_status.rpc_healthy is not None else True,
                 }
+
+                # Flatten system metrics into dashboard-friendly format
+                if health_status.system_metrics:
+                    sm = health_status.system_metrics
+                    triedb_data = sm.get("triedb", {})
+                    health_server_validators[validator.name]["system_metrics"] = {
+                        "cpu_used_percent": sm.get("cpu_used_percent"),
+                        "mem_percent": sm.get("mem_percent"),
+                        "disk_percent": sm.get("disk_percent"),
+                        "triedb_used_percent": triedb_data.get("used_percent") if isinstance(triedb_data, dict) else None,
+                    }
+
+                # Add block production metrics
+                if health_status.metrics:
+                    health_server_validators[validator.name]["block_production"] = {
+                        "proposals": health_status.metrics.get("proposals"),
+                        "block_commits": health_status.metrics.get("block_commits"),
+                        "local_timeout": health_status.metrics.get("local_timeout"),
+                    }
 
                 # Handle warnings (non-critical alerts)
                 if health_status.warnings:
@@ -462,13 +486,28 @@ def main():
             if health_server:
                 health_server.update_status(is_healthy=all_healthy, validators=health_server_validators)
 
+            # Fetch per-network TPS from gmonads and attach to each validator
+            if gmonads_client:
+                networks_seen = {v.network for v in validators if v.network}
+                network_tps = {}
+                for net in networks_seen:
+                    try:
+                        block_metrics = gmonads_client.get_block_metrics_1m(network=net)
+                        if block_metrics is not None:
+                            network_tps[net] = block_metrics.avg_tps
+                    except Exception as e:
+                        debug(f"Failed to fetch TPS for {net}: {e}")
+                # Attach TPS to each validator based on their network
+                for vname, vdata in health_server_validators.items():
+                    vdata["network_tps"] = network_tps.get(vdata.get("network"))
+
             # Update dashboard server with validator data
             if dashboard_server:
-                health_status = health_server.get_health_status() if health_server else None
+                health_status_obj = health_server.get_health_status() if health_server else None
                 dashboard_server.update_validators(
                     validators=health_server_validators,
                     status="healthy" if all_healthy else "unhealthy",
-                    uptime_seconds=health_status.uptime_seconds if health_status else 0.0,
+                    uptime_seconds=health_status_obj.uptime_seconds if health_status_obj else 0.0,
                 )
 
             # Check if it's time for extended health report (6-hour detailed report)

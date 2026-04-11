@@ -27,8 +27,39 @@
                     <span class="logo-subtext">Validator Monitor</span>
                 </div>
             </div>
+            <div class="header-right">
+                <span class="connection-indicator" role="status" aria-live="polite">
+                    <span id="connection-dot" class="connection-dot connected" aria-hidden="true"></span>
+                    <span id="connection-status">Connected</span>
+                </span>
+            </div>
         </div>
     </header>
+
+    <!-- Summary Bar -->
+    <div id="summary-bar" class="summary-bar">
+        <div class="summary-stat">
+            <span class="summary-stat-value" id="total-validators">-</span>
+            <span class="summary-stat-label">Validators</span>
+        </div>
+        <div class="summary-stat">
+            <span class="summary-stat-value summary-stat--active" id="active-count">-</span>
+            <span class="summary-stat-label">Active</span>
+        </div>
+        <div class="summary-stat">
+            <span class="summary-stat-value summary-stat--warning" id="warning-count">-</span>
+            <span class="summary-stat-label">Warnings</span>
+        </div>
+        <div class="summary-stat">
+            <span class="summary-stat-value summary-stat--critical" id="critical-count">-</span>
+            <span class="summary-stat-label">Critical</span>
+        </div>
+        <div class="summary-divider"></div>
+        <div class="summary-stat">
+            <span class="summary-stat-value" id="monitor-uptime">--</span>
+            <span class="summary-stat-label">Uptime</span>
+        </div>
+    </div>
 
     <!-- Main Content -->
     <div class="dashboard">
@@ -36,51 +67,22 @@
             <!-- Validator Status Cards Container -->
             <div id="validators-container" class="validators-container" role="list" aria-label="Validator status cards">
             </div>
-
-            <!-- Status Legend -->
-            <div class="legend-section" role="complementary" aria-label="Status legend">
-                <h3 class="legend-title">Status Legend</h3>
-                <div class="legend-items">
-                    <div class="legend-item">
-                        <span class="legend-dot legend-dot--active" aria-hidden="true"></span>
-                        <span class="legend-label">Active</span>
-                    </div>
-                    <div class="legend-item">
-                        <span class="legend-dot legend-dot--warning" aria-hidden="true"></span>
-                        <span class="legend-label">Warning</span>
-                    </div>
-                    <div class="legend-item">
-                        <span class="legend-dot legend-dot--inactive" aria-hidden="true"></span>
-                        <span class="legend-label">Inactive</span>
-                    </div>
-                    <div class="legend-item">
-                        <span class="legend-dot legend-dot--critical" aria-hidden="true"></span>
-                        <span class="legend-label">Critical</span>
-                    </div>
-                </div>
-            </div>
         </main>
     </div>
 
     <!-- Footer -->
     <footer class="footer" role="contentinfo">
         <div class="footer-content">
-            <div class="footer-status">
-                <span class="connection-indicator" role="status" aria-live="polite">
-                    <span id="connection-dot" class="connection-dot connected" aria-hidden="true"></span>
-                    <span id="connection-status">Connected</span>
-                </span>
-                <span class="refresh-badge" aria-label="Auto-refresh interval">Auto-refresh: 5s</span>
-            </div>
-            <div class="footer-credit">
-                <span>Made by MictoNode</span>
-            </div>
+            <span class="refresh-badge" aria-label="Auto-refresh interval">Auto-refresh: 5s</span>
+            <span class="footer-credit">Made by MictoNode</span>
         </div>
     </footer>
 
     <!-- Validator Card Template -->
     <template id="validator-card-template">
         <div class="validator-card" tabindex="0" role="listitem">
+            <div class="card-accent"></div>
+
             <div class="card-header">
                 <div class="validator-info">
                     <span class="validator-indicator" aria-hidden="true"></span>
@@ -106,6 +108,70 @@
                 <div class="metric">
                     <span class="metric-label">Fails</span>
                     <span class="metric-value metric-fails"></span>
+                </div>
+            </div>
+
+            <div class="card-resources">
+                <div class="resource-gauge" data-resource="cpu">
+                    <div class="gauge-header">
+                        <span class="gauge-label">CPU</span>
+                        <span class="gauge-value">--</span>
+                    </div>
+                    <div class="gauge-bar"><div class="gauge-fill"></div></div>
+                </div>
+                <div class="resource-gauge" data-resource="memory">
+                    <div class="gauge-header">
+                        <span class="gauge-label">MEM</span>
+                        <span class="gauge-value">--</span>
+                    </div>
+                    <div class="gauge-bar"><div class="gauge-fill"></div></div>
+                </div>
+                <div class="resource-gauge" data-resource="disk">
+                    <div class="gauge-header">
+                        <span class="gauge-label">DISK</span>
+                        <span class="gauge-value">--</span>
+                    </div>
+                    <div class="gauge-bar"><div class="gauge-fill"></div></div>
+                </div>
+            </div>
+
+            <div class="card-details">
+                <div class="details-grid">
+                    <div class="detail-item">
+                        <span class="detail-label">Proposals</span>
+                        <span class="detail-value detail-proposals">--</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Finalized</span>
+                        <span class="detail-value detail-finalized">--</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Timeouts</span>
+                        <span class="detail-value detail-timeouts">--</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Round Diff</span>
+                        <span class="detail-value detail-round-diff">--</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">RPC</span>
+                        <span class="detail-value detail-rpc">--</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">TPS</span>
+                        <span class="detail-value detail-tps">--</span>
+                    </div>
+                </div>
+                <div class="detail-triedb" hidden>
+                    <div class="gauge-header">
+                        <span class="gauge-label">TrieDB</span>
+                        <span class="gauge-value detail-triedb-value">--</span>
+                    </div>
+                    <div class="gauge-bar gauge-bar--wide"><div class="gauge-fill detail-triedb-fill"></div></div>
+                </div>
+                <div class="detail-warnings" hidden>
+                    <span class="detail-label">Alerts</span>
+                    <div class="warnings-list"></div>
                 </div>
             </div>
 

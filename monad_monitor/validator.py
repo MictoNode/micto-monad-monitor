@@ -159,9 +159,7 @@ class ValidatorHealthChecker:
                         huginn_data=huginn_data,
                     ), current_commits, current_execution_lagging, current_ts_validation_fail, False
                 # else: lagging is stable or decreasing, not a problem
-            # First check - just add as warning, don't alert yet
-            elif last_execution_lagging is None:
-                warnings.append(f"Execution lagging detected: {int(current_execution_lagging)} (monitoring)")
+            # First check - just record baseline, don't warn
 
         # Check ts_validation_fail - only warn if INCREASING for active validators
         # ts_validation_fail is a cumulative counter, so we track the delta
@@ -181,9 +179,7 @@ class ValidatorHealthChecker:
                     # The main loop will track consecutive occurrences separately
                     ts_fail_increasing = True
                     warnings.append(f"Timestamp validation fails increasing: +{int(ts_increase)} (total: {int(current_ts_validation_fail)})")
-            elif last_ts_validation_fail is None:
-                # First check - just add as warning, don't alert yet
-                warnings.append(f"Timestamp validation fails detected: {int(current_ts_validation_fail)} (monitoring)")
+            # First check - just record baseline, don't warn
 
         # Check if catching up (blocksync)
         blocksync = metrics.get("blocksync")
