@@ -401,6 +401,8 @@ Each validator card displays:
 
 Production-grade metrics dashboard with Prometheus time-series charts at `http://your-server-ip:8383`.
 
+![Metrics Dashboard Preview](assets/dashboard-metrics.png)
+
 ### Setup
 
 1. Add to your `.env` file (see Step 4.1):
