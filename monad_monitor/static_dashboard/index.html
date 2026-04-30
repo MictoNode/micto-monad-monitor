@@ -1,0 +1,1463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MONAD Nodes Metrics</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23836EF9' d='M12 3c-2.599 0-9 6.4-9 9s6.401 9 9 9s9-6.401 9-9s-6.401-9-9-9m-1.402 14.146c-1.097-.298-4.043-5.453-3.744-6.549s5.453-4.042 6.549-3.743c1.095.298 4.042 5.453 3.743 6.549c-.298 1.095-5.453 4.042-6.549 3.743'/%3E%3C/svg%3E">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <style>
+    :root {
+      --bg-primary: #0E091C;
+      --bg-card: #14111F;
+      --bg-card-hover: #1A1628;
+      --accent: #836EF9;
+      --accent-muted: rgba(131, 110, 249, 0.15);
+      --text-primary: #F8F7FC;
+      --text-secondary: #A8A4B8;
+      --text-muted: #6B6880;
+      --border: rgba(255, 255, 255, 0.08);
+      --border-solid: #1F1A2E;
+      --radius: 8px;
+      --status-up: #85E6FF;
+      --status-up-bg: rgba(133, 230, 255, 0.1);
+      --status-down: #FF6B6B;
+      --status-down-bg: rgba(255, 107, 107, 0.1);
+      --status-warning: #FFAE45;
+      --status-warning-bg: rgba(255, 174, 69, 0.1);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html {
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      line-height: 1.5;
+      overflow-x: hidden;
+    }
+
+    /* ─── Login ─── */
+    .login-screen {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+
+    .login-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-solid);
+      border-radius: 12px;
+      padding: 40px;
+      width: 100%;
+      max-width: 400px;
+      text-align: center;
+    }
+
+    .login-logo {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 20px;
+      filter: drop-shadow(0 0 12px rgba(131, 110, 249, 0.4));
+    }
+
+    .login-card h1 { margin-bottom: 4px; font-size: 20px; font-weight: 700; letter-spacing: 0.06em; }
+    .login-card p { color: var(--text-secondary); margin-bottom: 24px; font-size: 13px; letter-spacing: 0.02em; }
+
+    .login-card input {
+      width: 100%;
+      padding: 12px 16px;
+      border: 1px solid var(--border-solid);
+      border-radius: var(--radius);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-size: 14px;
+      outline: none;
+      margin-bottom: 16px;
+      transition: border-color 0.2s ease;
+    }
+
+    .login-card input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-muted); }
+
+    .login-card button {
+      width: 100%;
+      padding: 12px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s ease;
+    }
+
+    .login-card button:hover { opacity: 0.9; }
+
+    .login-error {
+      color: var(--status-down);
+      font-size: 13px;
+      margin-top: 12px;
+      min-height: 20px;
+    }
+
+    /* ─── Dashboard shell ─── */
+    .dashboard { display: none; }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border-solid);
+      background: var(--bg-card);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .header-logo-icon { display: flex; align-items: center; filter: drop-shadow(0 0 8px rgba(131, 110, 249, 0.4)); }
+    .header-logo-text { display: flex; flex-direction: column; gap: 2px; }
+    .header-logo-title { font-size: 18px; font-weight: 700; color: var(--text-primary); letter-spacing: 0.06em; }
+    .header-logo-sub { font-size: 11px; color: var(--text-muted); letter-spacing: 0.02em; }
+    .header-right { display: flex; align-items: center; gap: 16px; }
+    .header-timer { font-size: 13px; color: var(--text-secondary); }
+
+    .header-logout {
+      background: none;
+      border: 1px solid var(--border-solid);
+      color: var(--text-secondary);
+      padding: 6px 14px;
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-size: 13px;
+      transition: border-color 0.2s ease, color 0.2s ease;
+    }
+
+    .header-logout:hover { border-color: var(--accent); color: var(--text-primary); }
+    .header-logout:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    /* ─── Tabs ─── */
+    .tabs {
+      display: flex;
+      gap: 0;
+      padding: 0 24px;
+      border-bottom: 1px solid var(--border-solid);
+      background: var(--bg-card);
+    }
+
+    .tab {
+      padding: 12px 20px;
+      cursor: pointer;
+      font-size: 14px;
+      color: var(--text-secondary);
+      border-bottom: 2px solid transparent;
+      transition: color 0.2s, border-color 0.2s;
+    }
+
+    .tab:hover { color: var(--text-primary); }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tabs.hidden { display: none; }
+
+    /* ─── Overview stat bar ─── */
+    .overview {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 12px;
+      padding: 20px 24px;
+    }
+
+    .stat-box {
+      background: var(--bg-card);
+      border: 1px solid var(--border-solid);
+      border-radius: var(--radius);
+      padding: 16px;
+      text-align: center;
+      transition: background 0.2s ease;
+    }
+
+    .stat-box .label {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+
+    .stat-box .value { font-size: 22px; font-weight: 700; }
+
+    .stat-box.status-up { background: var(--status-up-bg); border-color: rgba(133, 230, 255, 0.25); }
+    .stat-box.status-up .value { color: var(--status-up); }
+    .stat-box.status-down { background: var(--status-down-bg); border-color: rgba(255, 107, 107, 0.25); }
+    .stat-box.status-down .value { color: var(--status-down); }
+    .stat-box.status-warning { background: var(--status-warning-bg); border-color: rgba(255, 174, 69, 0.25); }
+    .stat-box.status-warning .value { color: var(--status-warning); }
+    .stat-box.status-info { background: var(--accent-muted); border-color: rgba(131, 110, 249, 0.25); }
+    .stat-box.status-info .value { color: var(--accent); }
+
+    /* ─── Sections ─── */
+    .section { padding: 0 24px; margin-bottom: 8px; }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 0;
+      cursor: pointer;
+      user-select: none;
+      border-bottom: 1px solid var(--border-solid);
+      transition: color 0.2s ease;
+      flex-wrap: wrap;
+    }
+
+    .section-header:hover { color: var(--accent); }
+
+    .section-arrow {
+      font-size: 12px;
+      color: var(--text-secondary);
+      transition: transform 0.25s ease;
+      display: inline-block;
+    }
+
+    .section-arrow.collapsed { transform: rotate(-90deg); }
+
+    .section-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .section-count {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-left: 6px;
+    }
+
+    .section-desc {
+      display: block;
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.4;
+      margin: -2px 0 8px 0;
+      padding-left: 24px;
+      flex: 1 1 100%;
+    }
+
+    .section-body-wrapper {
+      display: grid;
+      grid-template-rows: 1fr;
+      transition: grid-template-rows 0.3s ease;
+    }
+
+    .section-body-wrapper.collapsed {
+      grid-template-rows: 0fr;
+    }
+
+    .section-body {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+      padding: 16px 0 24px;
+      overflow: hidden;
+      min-height: 0;
+    }
+
+    .section-body-wrapper.collapsed .section-body {
+      padding-top: 0;
+      padding-bottom: 0;
+    }
+
+    /* ─── Chart card ─── */
+    .chart-card {
+      background: var(--bg-card);
+      border-radius: var(--radius);
+      border: 1px solid var(--border-solid);
+      padding: 16px;
+      min-height: 280px;
+      position: relative;
+      transition: border-color 0.2s ease;
+    }
+
+    .chart-card:hover { border-color: rgba(131, 110, 249, 0.2); }
+
+    .chart-card h3 {
+      margin: 0 0 12px 0;
+      font-size: 13px;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+
+    .chart-desc {
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.4;
+      margin: -8px 0 10px 0;
+    }
+
+    .chart-card canvas { width: 100% !important; height: 200px !important; }
+
+    .chart-card .no-data {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 200px;
+      color: var(--text-secondary);
+      font-size: 13px;
+    }
+
+    /* ─── Footer ─── */
+    .footer {
+      text-align: center;
+      padding: 16px 24px;
+      color: var(--text-muted);
+      font-size: 12px;
+      border-top: 1px solid var(--border-solid);
+      margin-top: 16px;
+      letter-spacing: 0.02em;
+    }
+
+    /* ─── Responsive ─── */
+    @media (max-width: 1024px) {
+      .overview { grid-template-columns: repeat(3, 1fr); }
+    }
+
+    @media (max-width: 768px) {
+      .overview { grid-template-columns: repeat(2, 1fr); }
+      .section-body { grid-template-columns: 1fr; }
+    }
+
+    /* ─── Range Selector ─── */
+    .range-selector {
+      display: inline-flex;
+      margin-left: auto;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .range-selector button {
+      background: transparent;
+      color: rgba(255,255,255,0.5);
+      border: none;
+      border-right: 1px solid rgba(255,255,255,0.1);
+      padding: 6px 10px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 150ms ease, color 150ms ease;
+      min-height: 32px;
+      min-width: 36px;
+      font-family: inherit;
+    }
+    .range-selector button:last-child {
+      border-right: none;
+    }
+    .range-selector button:hover {
+      background: rgba(255,255,255,0.05);
+    }
+    .range-selector button.active {
+      background: rgba(131, 110, 249, 0.3);
+      color: #fff;
+    }
+    @media (max-width: 480px) {
+      .section-header {
+        gap: 6px;
+        padding: 10px 0;
+      }
+      .section-title {
+        font-size: 14px;
+      }
+      .section-desc {
+        order: 10;
+        margin-top: 2px;
+        padding-left: 0;
+      }
+      .range-selector {
+        order: 5;
+        margin-left: auto;
+      }
+      .range-selector button {
+        font-size: 11px;
+        padding: 5px 7px;
+        min-width: 28px;
+        min-height: 30px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Login Screen -->
+  <div id="login-screen" class="login-screen">
+    <div class="login-card">
+      <div class="login-logo">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path fill="#836EF9" d="M12 3c-2.599 0-9 6.4-9 9s6.401 9 9 9s9-6.401 9-9s-6.401-9-9-9m-1.402 14.146c-1.097-.298-4.043-5.453-3.744-6.549s5.453-4.042 6.549-3.743c1.095.298 4.042 5.453 3.743 6.549c-.298 1.095-5.453 4.042-6.549 3.743"/>
+        </svg>
+      </div>
+      <h1>MONAD</h1>
+      <p>Nodes Metrics</p>
+      <input type="password" id="password-input" placeholder="Enter password" autocomplete="current-password">
+      <button id="login-btn" onclick="login()">Sign In</button>
+      <div id="login-error" class="login-error"></div>
+    </div>
+  </div>
+
+  <!-- Dashboard -->
+  <div id="dashboard" class="dashboard">
+    <div class="header">
+      <div class="header-left">
+        <div class="header-logo-icon">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path fill="#836EF9" d="M12 3c-2.599 0-9 6.4-9 9s6.401 9 9 9s9-6.401 9-9s-6.401-9-9-9m-1.402 14.146c-1.097-.298-4.043-5.453-3.744-6.549s5.453-4.042 6.549-3.743c1.095.298 4.042 5.453 3.743 6.549c-.298 1.095-5.453 4.042-6.549 3.743"/>
+          </svg>
+        </div>
+        <div class="header-logo-text">
+          <span class="header-logo-title">MONAD</span>
+          <span class="header-logo-sub">Nodes Metrics</span>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="header-timer" id="refresh-timer">Refreshing in 30s</div>
+        <button class="header-logout" onclick="logout()">Logout</button>
+      </div>
+    </div>
+    <nav id="validator-tabs" class="tabs"></nav>
+    <section id="overview" class="overview"></section>
+    <div id="sections-container"></div>
+    <div class="footer">Made by MictoNode</div>
+  </div>
+
+  <script>
+    /* ──────────────────────────────────────────────────────
+       Constants & State
+    ────────────────────────────────────────────────────── */
+    const API = '';
+    const REFRESH_INTERVAL = 30;
+    const PALETTE = [
+      '#836EF9','#85E6FF','#FF6B9D','#FF8C42','#4ade80',
+      '#facc15','#f472b6','#a78bfa','#67e8f9','#fb923c'
+    ];
+
+    let jwt = null;
+    let validators = [];
+    let activeValidator = null;
+    let charts = {};          // canvasId -> Chart instance
+    let countdownInterval = null;
+    let countdown = REFRESH_INTERVAL;
+    let isHidden = false;
+    let sectionRanges = {};  // sectionId -> "1h" | "5m" | etc.
+
+    document.addEventListener('visibilitychange', () => {
+      isHidden = document.hidden;
+      if (!isHidden && jwt) {
+        countdown = REFRESH_INTERVAL;
+        updateTimerDisplay();
+        refresh();
+      }
+    });
+
+    /* ──────────────────────────────────────────────────────
+       Helpers
+    ────────────────────────────────────────────────────── */
+    function formatBytes(b) {
+      if (b == null) return 'N/A';
+      if (b >= 1e12) return (b/1e12).toFixed(1) + ' TB';
+      if (b >= 1e9)  return (b/1e9).toFixed(1)  + ' GB';
+      if (b >= 1e6)  return (b/1e6).toFixed(1)  + ' MB';
+      if (b >= 1e3)  return (b/1e3).toFixed(1)  + ' KB';
+      return b.toFixed(0) + ' B';
+    }
+
+    function formatPercent(v) { return v != null ? v.toFixed(1) + '%' : 'N/A'; }
+    function formatTemp(v) { return v != null ? v.toFixed(1) + '°C' : 'N/A'; }
+    function formatOps(v) { return v != null ? v.toFixed(2) + ' ops/s' : 'N/A'; }
+    function formatMs(v) { return v != null ? v.toFixed(1) + ' ms' : 'N/A'; }
+
+    function formatDuration(us) {
+      if (us == null) return 'N/A';
+      const s = us / 1e6;
+      const d = Math.floor(s / 86400);
+      const h = Math.floor((s % 86400) / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      if (d > 0) return d + 'd ' + h + 'h';
+      if (h > 0) return h + 'h ' + m + 'm';
+      return m + 'm';
+    }
+
+    function formatNum(n) {
+      if (n == null) return 'N/A';
+      if (typeof n === 'number') return n.toLocaleString();
+      return String(n);
+    }
+
+    function nextColor(idx) { return PALETTE[idx % PALETTE.length]; }
+
+    function resetRangeUI() {
+      document.querySelectorAll('.range-selector button').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.dataset.range === '1h') btn.classList.add('active');
+      });
+    }
+
+    /* ──────────────────────────────────────────────────────
+       Threshold line plugin
+    ────────────────────────────────────────────────────── */
+    const thresholdPlugin = {
+      id: 'thresholdLines',
+      beforeDraw(chart) {
+        const thresholds = chart.options.plugins.thresholdLines;
+        if (!thresholds || !thresholds.length) return;
+        const { ctx, chartArea, scales } = chart;
+        if (!chartArea || !scales.y) return;
+        thresholds.forEach(t => {
+          const y = scales.y.getPixelForValue(t.value);
+          if (y < chartArea.top || y > chartArea.bottom) return;
+          ctx.save();
+          ctx.beginPath();
+          ctx.moveTo(chartArea.left, y);
+          ctx.lineTo(chartArea.right, y);
+          ctx.strokeStyle = t.color || '#f59e0b';
+          ctx.lineWidth = 1;
+          ctx.setLineDash([6, 4]);
+          ctx.stroke();
+          ctx.restore();
+        });
+      }
+    };
+    Chart.register(thresholdPlugin);
+
+    /* ──────────────────────────────────────────────────────
+       Section & Chart Definitions
+    ────────────────────────────────────────────────────── */
+    const SECTIONS = [
+      {
+        id: 'consensus',
+        title: 'Consensus & Execution',
+        desc: 'Block production, voting, and execution performance',
+        charts: [
+          {
+            id: 'block-time',
+            title: 'Block Time (ms)',
+            desc: 'Milliseconds per block — healthy under 1s',
+            keys: ['block_time'],
+            seriesLabels: ['Block Time'],
+            thresholds: [{ value: 1000, color: '#f59e0b' }, { value: 2000, color: '#ef4444' }],
+            yTick: v => v.toFixed(0) + ' ms'
+          },
+          {
+            id: 'commit-rate',
+            title: 'Commit Rate',
+            desc: 'Blocks committed and transactions finalized per second',
+            keys: ['commit_rate', 'tx_throughput'],
+            seriesLabels: ['blocks/s', 'tx/s']
+          },
+          {
+            id: 'consensus-activity',
+            title: 'Consensus Activity',
+            desc: 'Rate of votes sent/received, proposals handled, QC and TC processed',
+            keys: ['consensus_votes', 'consensus_vote_received', 'consensus_handle_proposal', 'consensus_qc', 'consensus_tc'],
+            seriesLabels: ['Votes', 'Vote Received', 'Handle Proposal', 'QC', 'TC']
+          },
+          {
+            id: 'consensus-errors',
+            title: 'Consensus Errors & Anomalies',
+            desc: 'All near zero is healthy — spikes indicate consensus issues',
+            keys: ['consensus_local_timeout', 'consensus_bad_state_root', 'consensus_execution_lagging', 'consensus_failed_txn', 'consensus_out_of_order', 'consensus_invalid_leader', 'consensus_remote_timeout'],
+            seriesLabels: ['Local Timeout', 'Bad State Root', 'Execution Lagging', 'Failed Txn', 'Out of Order', 'Invalid Leader', 'Remote Timeout'],
+            stacked: true,
+            discrete: true
+          },
+          {
+            id: 'validation-errors',
+            title: 'Validation Errors',
+            desc: 'Block validation failures — should be zero in normal operation',
+            keys: ['validation_invalid_sig', 'validation_insufficient_stake', 'validation_invalid_author', 'validation_invalid_epoch', 'validation_invalid_seq', 'validation_not_well_formed'],
+            seriesLabels: ['Invalid Sig', 'Insufficient Stake', 'Invalid Author', 'Invalid Epoch', 'Invalid Seq', 'Not Well Formed'],
+            stacked: true,
+            discrete: true
+          },
+          {
+            id: 'vote-readiness',
+            title: 'Vote Readiness Latency',
+            desc: 'Delay between block proposal and vote readiness (p50/p90/p99)',
+            keys: ['vote_delay_p50', 'vote_delay_p90', 'vote_delay_p99'],
+            seriesLabels: ['p50', 'p90', 'p99'],
+            yTick: v => v.toFixed(0) + ' ms'
+          },
+          {
+            id: 'tc-ratio',
+            title: 'TC Ratio — Consensus Health',
+            desc: 'TC/(QC+TC) — 0% means no timeouts, >5% warning, >15% critical',
+            keys: ['tc_ratio'],
+            seriesLabels: ['TC Ratio'],
+            thresholds: [{ value: 0.05, color: '#f59e0b' }, { value: 0.15, color: '#ef4444' }],
+            yTick: v => (v * 100).toFixed(1) + '%',
+            yMax: 1
+          }
+        ]
+      },
+      {
+        id: 'network',
+        title: 'Peer & Network',
+        desc: 'P2P connectivity, discovery, and traffic metrics',
+        charts: [
+          {
+            id: 'peer-counts',
+            title: 'Peer Counts',
+            desc: 'Connected validators, fullnodes, and pending connections',
+            keys: ['peers', 'upstream_validators', 'downstream_fullnodes', 'pending_peers'],
+            seriesLabels: ['Peers', 'Upstream Validators', 'Downstream Fullnodes', 'Pending']
+          },
+          {
+            id: 'peer-errors',
+            title: 'Peer Discovery Errors',
+            desc: 'All near zero is healthy — spikes indicate connectivity issues',
+            keys: ['peer_ping_timeout', 'peer_lookup_timeout', 'peer_rate_limited', 'peer_drop_ping', 'peer_retry_lookup'],
+            seriesLabels: ['Ping Timeout', 'Lookup Timeout', 'Rate Limited', 'Drop Ping', 'Retry Lookup'],
+            stacked: true,
+            discrete: true
+          },
+          {
+            id: 'peer-traffic',
+            title: 'Peer Discovery Traffic',
+            desc: 'Ping/pong and lookup message exchange rate',
+            keys: ['peer_send_ping', 'peer_recv_pong', 'peer_send_lookup', 'peer_recv_lookup_response'],
+            seriesLabels: ['Send Ping', 'Recv Pong', 'Send Lookup', 'Recv Lookup Response']
+          }
+        ]
+      },
+      {
+        id: 'raptor',
+        title: 'Raptorcast',
+        desc: 'Block broadcast protocol — latency, throughput, and reliability',
+        charts: [
+          {
+            id: 'raptor-latency',
+            title: 'Broadcast Latency p99',
+            desc: 'Block propagation delay — primary vs secondary broadcast path',
+            keys: ['raptor_primary_latency', 'raptor_secondary_latency'],
+            seriesLabels: ['Primary', 'Secondary'],
+            yTick: v => v.toFixed(0) + ' ms'
+          },
+          {
+            id: 'raptor-throughput',
+            title: 'Throughput',
+            desc: 'Authenticated and non-authenticated UDP data throughput',
+            keys: ['raptor_authed_rx', 'raptor_authed_tx', 'raptor_non_authed_rx'],
+            seriesLabels: ['Authed RX', 'Authed TX', 'Non-Authed RX'],
+            yTick: v => formatBytes(v) + '/s'
+          },
+          {
+            id: 'raptor-cache',
+            title: 'Decode Cache',
+            desc: 'Message decode rate — cache hits, pending hits, and new entries',
+            keys: ['raptor_decoded', 'raptor_cache_hit', 'raptor_pending_hit', 'raptor_new_entry', 'raptor_total_messages'],
+            seriesLabels: ['Decoded', 'Cache Hit', 'Pending Hit', 'New Entry', 'Total Messages']
+          },
+          {
+            id: 'raptor-errors',
+            title: 'Errors & Insertions',
+            desc: 'Receive errors vs P2P decoding cache insertions',
+            keys: ['raptor_recv_errors', 'raptor_insertions'],
+            seriesLabels: ['Recv Errors', 'P2P Insertions'],
+            discrete: true
+          }
+        ]
+      },
+      {
+        id: 'txpool',
+        title: 'Txpool',
+        desc: 'Transaction pool — depth, lifecycle, and rejection reasons',
+        charts: [
+          {
+            id: 'txpool-depth',
+            title: 'Depth',
+            desc: 'Transactions waiting in pool and unique sender addresses',
+            keys: ['txpool_txs', 'txpool_addresses'],
+            seriesLabels: ['Transactions', 'Addresses']
+          },
+          {
+            id: 'txpool-flow',
+            title: 'Flow',
+            desc: 'Transaction lifecycle — inserts, committed removals, and expirations',
+            keys: ['txpool_owned_inserts', 'txpool_forwarded_inserts', 'txpool_committed_removals', 'txpool_expired_evictions'],
+            seriesLabels: ['Owned Inserts', 'Forwarded Inserts', 'Committed Removals', 'Expired Evictions']
+          },
+          {
+            id: 'txpool-drops',
+            title: 'Drop Reasons',
+            desc: 'Why transactions are rejected from the pool — all near zero is healthy',
+            keys: ['txpool_drop_nonce', 'txpool_drop_fee', 'txpool_drop_balance', 'txpool_drop_full', 'txpool_drop_replaced', 'txpool_drop_existing', 'txpool_drop_sig', 'txpool_drop_malformed', 'txpool_drop_not_ready'],
+            seriesLabels: ['Nonce', 'Fee', 'Balance', 'Full', 'Replaced', 'Existing', 'Sig', 'Malformed', 'Not Ready'],
+            stacked: true,
+            discrete: true
+          }
+        ]
+      },
+      {
+        id: 'rpc',
+        title: 'RPC',
+        desc: 'JSON-RPC — active requests, latency, and per-method breakdown',
+        charts: [
+          {
+            id: 'rpc-active',
+            title: 'Active RPC Requests',
+            desc: 'Concurrent in-flight RPC requests (sum of all methods)',
+            keys: ['rpc_active'],
+            seriesLabels: ['Active']
+          },
+          {
+            id: 'rpc-duration',
+            title: 'RPC Execution Duration',
+            desc: 'Request processing time — p50, p95, p99 percentiles',
+            keys: ['rpc_exec_p50', 'rpc_exec_p95', 'rpc_exec_p99'],
+            seriesLabels: ['p50', 'p95', 'p99'],
+            transform: v => v != null ? v * 1000 : null,  // seconds -> ms
+            yTick: v => v.toFixed(1) + ' ms'
+          },
+          {
+            id: 'rpc-call-rate',
+            title: 'RPC Call Rate',
+            desc: 'Calls per second — each line is a different RPC method',
+            keys: ['rpc_call_rate'],
+            seriesLabels: ['Calls'],
+            multiResult: true,
+            yTick: v => v.toFixed(1) + ' /s'
+          },
+          {
+            id: 'rpc-wait',
+            title: 'RPC Wait Time',
+            desc: 'Queue wait time before execution begins — p50, p95, p99',
+            keys: ['rpc_wait_p50', 'rpc_wait_p95', 'rpc_wait_p99'],
+            seriesLabels: ['p50', 'p95', 'p99'],
+            transform: v => v != null ? v * 1000 : null,
+            yTick: v => v.toFixed(2) + ' ms'
+          },
+          {
+            id: 'rpc-methods',
+            title: 'RPC Methods Latency (p99)',
+            desc: 'Per-method worst-case latency — each line is a different method',
+            keys: ['rpc_methods_latency'],
+            seriesLabels: ['Latency'],
+            multiResult: true,
+            transform: v => v != null ? v * 1000 : null,
+            yTick: v => v.toFixed(2) + ' ms'
+          }
+        ]
+      },
+      {
+        id: 'host',
+        title: 'Host',
+        desc: 'Server resources — CPU, memory, disk, network, and NVMe health',
+        charts: [
+          {
+            id: 'cpu-usage',
+            title: 'CPU Usage',
+            desc: 'CPU utilization breakdown — sustained >80% needs attention',
+            keys: ['cpu_user', 'cpu_system', 'cpu_iowait', 'cpu_softirq', 'cpu_nice'],
+            seriesLabels: ['User', 'System', 'IOWait', 'SoftIRQ', 'Nice'],
+            transform: v => v != null ? v * 100 : null,
+            yTick: v => v.toFixed(0) + '%',
+            yMax: 100
+          },
+          {
+            id: 'memory-breakdown',
+            title: 'Memory Breakdown',
+            desc: 'RAM allocation — used, page cache + buffers, and free',
+            keys: ['memory_used', 'memory_cache', 'memory_free'],
+            seriesLabels: ['Used', 'Cache', 'Free'],
+            yTick: v => formatBytes(v)
+          },
+          {
+            id: 'disk-io',
+            title: 'Disk I/O',
+            desc: 'Read and write throughput per block device',
+            keys: ['disk_read', 'disk_write'],
+            seriesLabels: ['Read', 'Write'],
+            multiResult: true,
+            yTick: v => formatBytes(v) + '/s'
+          },
+          {
+            id: 'disk-usage',
+            title: 'Filesystem Usage',
+            desc: 'Disk usage per mount point — 75% warning, 90% critical',
+            keys: ['disk_usage'],
+            seriesLabels: ['Usage'],
+            multiResult: true,
+            thresholds: [{ value: 75, color: '#f59e0b' }, { value: 90, color: '#ef4444' }],
+            yTick: v => v.toFixed(0) + '%',
+            yMax: 100
+          },
+          {
+            id: 'net-throughput',
+            title: 'Network Throughput',
+            desc: 'Network traffic per physical interface (virtual devices filtered)',
+            keys: ['net_recv', 'net_sent'],
+            seriesLabels: ['Recv', 'Sent'],
+            multiResult: true,
+            yTick: v => formatBytes(v) + '/s'
+          },
+          {
+            id: 'load-avg',
+            title: 'Load Average',
+            desc: 'Per-core normalized load — 1.0 = one core fully loaded',
+            keys: ['load1', 'load5', 'load15'],
+            seriesLabels: ['1m', '5m', '15m']
+          },
+          {
+            id: 'nvme-temp',
+            title: 'NVMe Temperature',
+            desc: 'NVMe drive temperature — 65°C warning, 75°C critical',
+            keys: ['nvme_temp'],
+            seriesLabels: ['Temp'],
+            multiResult: true,
+            thresholds: [{ value: 65, color: '#f59e0b' }, { value: 75, color: '#ef4444' }],
+            yTick: v => v.toFixed(1) + '°C'
+          },
+          {
+            id: 'nvme-wear',
+            title: 'NVMe Wear Level',
+            desc: 'Manufacturer-defined lifespan consumed — 70% warning, 90% critical',
+            keys: ['nvme_wear'],
+            seriesLabels: ['Wear'],
+            multiResult: true,
+            thresholds: [{ value: 70, color: '#f59e0b' }, { value: 90, color: '#ef4444' }],
+            transform: v => v != null ? v * 100 : null,
+            yMax: 100,
+            yTick: v => v.toFixed(1) + '%'
+          }
+        ]
+      },
+      {
+        id: 'triedb',
+        title: 'TrieDB',
+        desc: 'Trie database storage allocation (fast cache, slow disk, free space)',
+        charts: [
+          {
+            id: 'triedb-usage',
+            title: 'TrieDB Usage',
+            desc: 'Fast cache (hot), slow disk (cold), and free capacity',
+            keys: ['triedb_fast', 'triedb_slow', 'triedb_free'],
+            seriesLabels: ['Fast', 'Slow', 'Free'],
+            yTick: v => formatBytes(v)
+          }
+        ]
+      }
+    ];
+
+    /* ──────────────────────────────────────────────────────
+       DOM Construction
+    ────────────────────────────────────────────────────── */
+    function buildSections() {
+      const container = document.getElementById('sections-container');
+      container.textContent = '';
+
+      SECTIONS.forEach(section => {
+        const sec = document.createElement('div');
+        sec.className = 'section';
+
+        // Header
+        const header = document.createElement('div');
+        header.className = 'section-header';
+        header.addEventListener('click', () => toggleSection(section.id));
+
+        const arrow = document.createElement('span');
+        arrow.className = 'section-arrow';
+        arrow.id = 'arrow-' + section.id;
+        arrow.textContent = '▾';
+
+        const title = document.createElement('span');
+        title.className = 'section-title';
+        title.textContent = section.title;
+
+        const count = document.createElement('span');
+        count.className = 'section-count';
+        count.textContent = '(' + section.charts.length + ')';
+
+        header.appendChild(arrow);
+        header.appendChild(title);
+        header.appendChild(count);
+
+        if (section.desc) {
+          const secDesc = document.createElement('span');
+          secDesc.className = 'section-desc';
+          secDesc.textContent = section.desc;
+          header.appendChild(secDesc);
+        }
+
+        const rangeSel = document.createElement('div');
+        rangeSel.className = 'range-selector';
+        rangeSel.dataset.section = section.id;
+        ['1m','5m','30m','1h','all'].forEach(r => {
+          const btn = document.createElement('button');
+          btn.textContent = r === 'all' ? 'All' : r;
+          btn.dataset.range = r;
+          if (r === '1h') btn.classList.add('active');
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();  // prevent section toggle
+            const secId = e.target.parentElement.dataset.section;
+            sectionRanges[secId] = r;
+            e.target.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+            e.target.classList.add('active');
+            updateSectionCharts(secId);
+          });
+          rangeSel.appendChild(btn);
+        });
+        header.appendChild(rangeSel);
+
+        sec.appendChild(header);
+
+        // Body wrapper for grid-template-rows animation
+        const wrapper = document.createElement('div');
+        wrapper.className = 'section-body-wrapper';
+        wrapper.id = 'wrapper-' + section.id;
+
+        const body = document.createElement('div');
+        body.className = 'section-body';
+        body.id = 'body-' + section.id;
+
+        section.charts.forEach(chartDef => {
+          const card = document.createElement('div');
+          card.className = 'chart-card';
+
+          const h3 = document.createElement('h3');
+          h3.textContent = chartDef.title;
+          card.appendChild(h3);
+
+          if (chartDef.desc) {
+            h3.id = 'label-' + chartDef.id;
+            const desc = document.createElement('p');
+            desc.className = 'chart-desc';
+            desc.id = 'desc-' + chartDef.id;
+            desc.textContent = chartDef.desc;
+            card.appendChild(desc);
+            h3.setAttribute('aria-describedby', 'desc-' + chartDef.id);
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.id = 'chart-' + chartDef.id;
+          card.appendChild(canvas);
+
+          body.appendChild(card);
+        });
+
+        wrapper.appendChild(body);
+        sec.appendChild(wrapper);
+        container.appendChild(sec);
+      });
+    }
+
+    function toggleSection(sectionId) {
+      const wrapper = document.getElementById('wrapper-' + sectionId);
+      const arrow = document.getElementById('arrow-' + sectionId);
+      if (!wrapper || !arrow) return;
+      wrapper.classList.toggle('collapsed');
+      arrow.classList.toggle('collapsed');
+    }
+
+    /* ──────────────────────────────────────────────────────
+       Chart Creation
+    ────────────────────────────────────────────────────── */
+    function baseChartOpts(def) {
+      const opts = {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: {
+            labels: {
+              color: '#A8A4B8',
+              font: { size: 11 },
+              boxWidth: 12,
+              padding: 8
+            }
+          },
+          tooltip: {
+            backgroundColor: '#14111F',
+            borderColor: '#1F1A2E',
+            borderWidth: 1,
+            titleColor: '#F8F7FC',
+            bodyColor: '#A8A4B8',
+            bodyFont: { size: 11 },
+            callbacks: {
+              label: function(ctx) {
+                let val = ctx.parsed.y;
+                if (val == null) return null;
+                if (def.yTick) {
+                  return ctx.dataset.label + ': ' + def.yTick(val);
+                }
+                return ctx.dataset.label + ': ' + val.toLocaleString(undefined, {maximumFractionDigits: 2});
+              }
+            }
+          },
+          thresholdLines: def.thresholds || []
+        },
+        scales: {
+          x: {
+            display: true,
+            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+            ticks: {
+              color: '#6B6880',
+              font: { size: 10 },
+              maxTicksLimit: 8,
+              maxRotation: 0
+            }
+          },
+          y: {
+            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+            ticks: {
+              color: '#A8A4B8',
+              font: { size: 11 },
+              callback: def.yTick ? (v => def.yTick(v)) : undefined
+            },
+            beginAtZero: def.stacked ? true : undefined,
+            max: def.yMax || undefined,
+            stacked: def.stacked || false
+          }
+        }
+      };
+      if (def.stacked) opts.scales.x = { ...opts.scales.x, stacked: true };
+      return opts;
+    }
+
+    function makeDatasets(def) {
+      return def.seriesLabels.map((label, i) => ({
+        label,
+        data: [],
+        borderColor: nextColor(i),
+        backgroundColor: def.stacked ? nextColor(i) + '4D' : nextColor(i) + '15',
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: def.discrete ? 0 : 0.3,
+        fill: def.stacked ? 'stack' : false
+      }));
+    }
+
+    function initCharts() {
+      // Destroy existing charts
+      Object.values(charts).forEach(c => { try { c.destroy(); } catch (e) {} });
+      charts = {};
+
+      SECTIONS.forEach(section => {
+        section.charts.forEach(def => {
+          const canvas = document.getElementById('chart-' + def.id);
+          if (!canvas) return;
+          showChartNoData(def.id, true);
+          charts[def.id] = new Chart(canvas.getContext('2d'), {
+            type: 'line',
+            data: {
+              labels: [],
+              datasets: makeDatasets(def)
+            },
+            options: baseChartOpts(def)
+          });
+        });
+      });
+    }
+
+    function showChartNoData(chartId, show) {
+      const canvas = document.getElementById('chart-' + chartId);
+      if (!canvas) return;
+      const card = canvas.closest('.chart-card');
+      if (!card) return;
+      let nd = card.querySelector('.no-data');
+      if (show) {
+        canvas.style.display = 'none';
+        if (!nd) {
+          nd = document.createElement('div');
+          nd.className = 'no-data';
+          nd.textContent = 'Waiting for data…';
+          card.appendChild(nd);
+        }
+      } else {
+        canvas.style.display = '';
+        if (nd) nd.remove();
+      }
+    }
+
+    /* ──────────────────────────────────────────────────────
+       Auth
+    ────────────────────────────────────────────────────── */
+    async function login() {
+      const pw = document.getElementById('password-input').value;
+      const errEl = document.getElementById('login-error');
+      errEl.textContent = '';
+      try {
+        const r = await fetch(API + '/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pw })
+        });
+        if (!r.ok) { errEl.textContent = 'Invalid password'; return; }
+        jwt = 'session';
+        showDashboard();
+      } catch (e) { errEl.textContent = 'Connection error'; }
+    }
+
+    document.getElementById('password-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter') login();
+    });
+
+    function logout() {
+      jwt = null;
+      stopPolling();
+      fetch(API + '/api/auth/logout', { method: 'POST' }).catch(() => {});
+      document.getElementById('password-input').value = '';
+      document.getElementById('login-screen').style.display = 'flex';
+      document.getElementById('dashboard').style.display = 'none';
+    }
+
+    function showDashboard() {
+      document.getElementById('login-screen').style.display = 'none';
+      document.getElementById('dashboard').style.display = 'block';
+      buildSections();
+      initCharts();
+      fetchValidators();
+    }
+
+    async function apiFetch(path) {
+      const r = await fetch(API + path);
+      if (r.status === 401) { logout(); throw new Error('unauth'); }
+      return r;
+    }
+
+    /* ──────────────────────────────────────────────────────
+       Validators
+    ────────────────────────────────────────────────────── */
+    async function fetchValidators() {
+      try {
+        const r = await apiFetch('/api/validators');
+        validators = await r.json();
+        renderTabs();
+        if (validators.length > 0) selectValidator(validators[0].name);
+        startPolling();
+      } catch (e) { if (e.message !== 'unauth') console.error(e); }
+    }
+
+    function renderTabs() {
+      const tabs = document.getElementById('validator-tabs');
+      if (validators.length <= 1) { tabs.classList.add('hidden'); return; }
+      tabs.classList.remove('hidden');
+      tabs.textContent = '';
+      for (const v of validators) {
+        const tab = document.createElement('div');
+        tab.className = 'tab' + (v.name === activeValidator ? ' active' : '');
+        tab.textContent = v.name;
+        tab.addEventListener('click', () => selectValidator(v.name));
+        tabs.appendChild(tab);
+      }
+    }
+
+    function clearAllCharts() {
+      Object.values(charts).forEach(c => {
+        c.data.labels = [];
+        c.data.datasets.forEach(ds => { ds.data = []; });
+        c.update('none');
+      });
+    }
+
+    function selectValidator(name) {
+      activeValidator = name;
+      sectionRanges = {};
+      resetRangeUI();
+      clearAllCharts();
+      renderTabs();
+      refresh();
+    }
+
+    /* ──────────────────────────────────────────────────────
+       Overview Stat Bar
+    ────────────────────────────────────────────────────── */
+    async function fetchOverview() {
+      try {
+        const r = await apiFetch('/api/overview');
+        const data = await r.json();
+        renderOverview(data[activeValidator] || {});
+      } catch (e) { if (e.message !== 'unauth') console.error(e); }
+    }
+
+    function renderOverview(m) {
+      const el = document.getElementById('overview');
+      el.textContent = '';
+
+      const stats = [
+        {
+          label: 'Node Status',
+          value: m.node_status === 1 ? 'UP' : m.node_status === 0 ? 'DOWN' : 'N/A',
+          cls: m.node_status === 1 ? 'status-up' : m.node_status === 0 ? 'status-down' : ''
+        },
+        {
+          label: 'Block Height',
+          value: formatNum(m.block_height),
+          cls: 'status-info'
+        },
+        {
+          label: 'Sync Status',
+          value: m.syncing === 0 ? 'SYNCED' : m.syncing === 1 ? 'SYNCING' : 'N/A',
+          cls: m.syncing === 0 ? 'status-up' : m.syncing === 1 ? 'status-warning' : ''
+        },
+        {
+          label: 'Self Stake',
+          value: m.self_stake_bps != null ? (m.self_stake_bps / 100).toFixed(2) + '%' : 'N/A',
+          cls: 'status-info'
+        },
+        {
+          label: 'Total Peers',
+          value: formatNum(m.peers),
+          cls: m.peers != null
+            ? (m.peers >= 50 ? 'status-up'
+              : m.peers >= 20 ? 'status-warning'
+              : 'status-down')
+            : ''
+        },
+        {
+          label: 'Uptime',
+          value: formatDuration(m.uptime_us),
+          cls: 'status-info'
+        }
+      ];
+
+      stats.forEach(s => {
+        const box = document.createElement('div');
+        box.className = 'stat-box' + (s.cls ? ' ' + s.cls : '');
+
+        const lbl = document.createElement('div');
+        lbl.className = 'label';
+        lbl.textContent = s.label;
+
+        const val = document.createElement('div');
+        val.className = 'value';
+        val.textContent = s.value;
+
+        box.appendChild(lbl);
+        box.appendChild(val);
+        el.appendChild(box);
+      });
+    }
+
+    /* ──────────────────────────────────────────────────────
+       Chart Data Update
+    ────────────────────────────────────────────────────── */
+    async function updateCharts() {
+      if (!activeValidator) return;
+      const enc = encodeURIComponent(activeValidator);
+
+      const tasks = SECTIONS.flatMap(section => {
+        const range = sectionRanges[section.id] || '1h';
+        return section.charts.map(def =>
+          updateSingleChart(def, enc, range).catch(() => {})
+        );
+      });
+      await Promise.all(tasks);
+    }
+
+    async function updateSectionCharts(sectionId) {
+      if (!activeValidator) return;
+      const enc = encodeURIComponent(activeValidator);
+      const section = SECTIONS.find(s => s.id === sectionId);
+      if (!section) return;
+      const range = sectionRanges[sectionId] || '1h';
+      await Promise.all(section.charts.map(def =>
+        updateSingleChart(def, enc, range).catch(() => {})
+      ));
+    }
+
+    async function updateSingleChart(def, enc, range) {
+      const chart = charts[def.id];
+      if (!chart) return;
+
+      // For multi-result charts or single-key charts, we handle differently
+      if (def.multiResult) {
+        await updateMultiResultChart(def, chart, enc, range);
+        return;
+      }
+
+      const keys = def.keys;
+      const fetches = keys.map(key =>
+        apiFetch('/api/chart/' + enc + '/' + key + '?range=' + (range || '1h'))
+          .then(r => r.json())
+          .then(d => d.series || [])
+          .catch(() => [])
+      );
+
+      const allSeries = await Promise.all(fetches);
+
+      // Use the longest series for timestamps
+      let longestLabels = [];
+      allSeries.forEach((seriesList, i) => {
+        if (seriesList.length > 0 && seriesList[0].values.length > longestLabels.length) {
+          longestLabels = seriesList[0].values;
+        }
+      });
+
+      if (longestLabels.length > 0) {
+        chart.data.labels = longestLabels.map(p =>
+          new Date(p[0] * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        );
+      }
+
+      // Map each key's series[0].values to the corresponding dataset
+      let hasAnyData = false;
+      allSeries.forEach((seriesList, i) => {
+        if (i < chart.data.datasets.length && seriesList.length > 0) {
+          const vals = seriesList[0].values;
+          chart.data.datasets[i].data = vals.map(p => {
+            const v = def.transform ? def.transform(p[1]) : p[1];
+            return v;
+          });
+          if (vals.length > 0) hasAnyData = true;
+        }
+      });
+
+      showChartNoData(def.id, !hasAnyData);
+      chart.update('none');
+    }
+
+    async function updateMultiResultChart(def, chart, enc, range) {
+      // For multi-result charts, we may need to rebuild datasets dynamically
+      const keys = def.keys;
+      const fetches = keys.map(key =>
+        apiFetch('/api/chart/' + enc + '/' + key + '?range=' + (range || '1h'))
+          .then(r => r.json())
+          .then(d => d.series || [])
+          .catch(() => [])
+      );
+
+      const allSeries = await Promise.all(fetches);
+
+      // Build datasets dynamically
+      const newDatasets = [];
+      let longestLabels = [];
+      let colorCounter = 0;
+
+      keys.forEach((key, ki) => {
+        const seriesList = allSeries[ki];
+        if (!seriesList || seriesList.length === 0) {
+          const ci = colorCounter++;
+          const ds = {
+            label: def.seriesLabels[ki] || key,
+            data: [],
+            borderColor: nextColor(ci),
+            backgroundColor: def.stacked ? nextColor(ci) + '4D' : nextColor(ci) + '15',
+            borderWidth: 1.5,
+            pointRadius: 0,
+            tension: def.discrete ? 0 : 0.3,
+            fill: def.stacked ? 'stack' : false
+          };
+          newDatasets.push(ds);
+          return;
+        }
+
+        // Find labels that actually vary across series — skip ones identical for all
+        const skipLabels = new Set(['__name__', 'name', 'instance', 'job']);
+        const labelValues = {};
+        seriesList.forEach(series => {
+          const labels = series.labels || {};
+          for (const [k, v] of Object.entries(labels)) {
+            if (!labelValues[k]) labelValues[k] = new Set();
+            labelValues[k].add(v);
+          }
+        });
+        const discrimLabels = Object.keys(labelValues)
+          .filter(k => !skipLabels.has(k) && labelValues[k].size > 1);
+
+        seriesList.forEach((series, si) => {
+          const labels = series.labels || {};
+          let discrim = '';
+          for (const k of discrimLabels) {
+            if (labels[k]) { discrim = labels[k]; break; }
+          }
+          const baseLabel = def.seriesLabels[ki] || key;
+          const dsLabel = discrim ? baseLabel + ' (' + discrim + ')' : baseLabel;
+
+          if (series.values.length > longestLabels.length) {
+            longestLabels = series.values;
+          }
+
+          const ci = colorCounter++;
+          newDatasets.push({
+            label: dsLabel,
+            data: series.values.map(p => {
+              const v = def.transform ? def.transform(p[1]) : p[1];
+              return v;
+            }),
+            borderColor: nextColor(ci),
+            backgroundColor: def.stacked ? nextColor(ci) + '4D' : nextColor(ci) + '15',
+            borderWidth: 1.5,
+            pointRadius: 0,
+            tension: def.discrete ? 0 : 0.3,
+            fill: def.stacked ? 'stack' : false
+          });
+        });
+      });
+
+      if (longestLabels.length > 0) {
+        chart.data.labels = longestLabels.map(p =>
+          new Date(p[0] * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        );
+      }
+
+      const hasAnyData = newDatasets.some(ds => ds.data.length > 0);
+      showChartNoData(def.id, !hasAnyData);
+      chart.data.datasets = newDatasets;
+      chart.update('none');
+    }
+
+    /* ──────────────────────────────────────────────────────
+       Polling
+    ────────────────────────────────────────────────────── */
+    function startPolling() {
+      stopPolling();
+      countdown = REFRESH_INTERVAL;
+      updateTimerDisplay();
+      countdownInterval = setInterval(() => {
+        countdown--;
+        updateTimerDisplay();
+        if (countdown <= 0) {
+          countdown = REFRESH_INTERVAL;
+          if (!isHidden) refresh();
+        }
+      }, 1000);
+    }
+
+    function stopPolling() {
+      if (countdownInterval) clearInterval(countdownInterval);
+      countdownInterval = null;
+    }
+
+    function updateTimerDisplay() {
+      document.getElementById('refresh-timer').textContent = 'Refreshing in ' + countdown + 's';
+    }
+
+    async function refresh() {
+      if (isHidden) return;
+      await fetchOverview();
+      await updateCharts();
+    }
+
+    /* ──────────────────────────────────────────────────────
+       Init
+    ────────────────────────────────────────────────────── */
+    async function init() {
+      try {
+        const r = await fetch(API + '/api/validators');
+        if (r.ok) {
+          jwt = 'session';
+          showDashboard();
+        }
+      } catch (e) {}
+    }
+
+    init();
+  </script>
+</body>
+</html>

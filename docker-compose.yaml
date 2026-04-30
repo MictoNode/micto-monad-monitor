@@ -13,11 +13,17 @@ services:
     ports:
       - "8181:8181"
       - "8282:8282"
+      - "8383:8383"
     environment:
       - TZ=${TZ:-UTC}
       - PYTHONUNBUFFERED=1
       - HEALTH_PORT=${HEALTH_PORT:-8181}
       - DASHBOARD_PORT=${DASHBOARD_PORT:-8282}
+      - API_PORT=${API_PORT:-8383}
+      - DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD:-}
+      - DASHBOARD_JWT_SECRET=${DASHBOARD_JWT_SECRET:-}
+    depends_on:
+      - prometheus
     logging:
       driver: "json-file"
       options:
@@ -30,5 +36,25 @@ services:
       retries: 3
       start_period: 30s
 
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: monad-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=30d'
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - monitor-state:/etc/prometheus/targets:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   monitor-state:
+  prometheus-data:

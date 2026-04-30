@@ -1,6 +1,6 @@
 # Monad Validator Monitor
 
-[![Version](https://img.shields.io/badge/version-1.0.0-8B5CF6?style=flat-square)](https://github.com/MictoNode/micto-monad-monitor)
+[![Version](https://img.shields.io/badge/version-1.4.0-8B5CF6?style=flat-square)](https://github.com/MictoNode/micto-monad-monitor)
 [![Python](https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docker.com)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
@@ -13,7 +13,9 @@
 
 ## What's New
 
-- **Web Dashboard** - Real-time status at `http://your-server:8282`
+- **Metrics Dashboard** - 27 Prometheus charts across 7 sections at `http://your-server:8383`
+- **Monitor Dashboard** - Real-time validator status at `http://your-server:8282`
+- **Time range selector** - 1m, 5m, 30m, 1h, All per chart section
 - **Multi-source validation** - Huginn + gmonads API cross-validation
 - **Active set tracking** - Know when your validator enters/leaves active set
 - **Pushover emergency alerts** - Bypass Do Not Disturb mode
@@ -77,7 +79,8 @@ docker compose logs -f
 
 You should get a **"Monad Monitor Started"** message on your configured alert channel(s).
 
-**Dashboard:** `http://your-server-ip:8282`
+**Monitor Dashboard:** `http://your-server-ip:8282` — Real-time validator status
+**Metrics Dashboard:** `http://your-server-ip:8383` — Prometheus charts (requires `DASHBOARD_PASSWORD` + `DASHBOARD_JWT_SECRET` in `.env`)
 
 ---
 
@@ -164,7 +167,7 @@ crontab -e
 docker run -d \
   --name node-exporter \
   --restart unless-stopped \
-  -p 9100:9100 \
+  --network=host \
   -v /proc:/host/proc:ro \
   -v /sys:/host/sys:ro \
   -v /:/rootfs:ro \
@@ -173,11 +176,20 @@ docker run -d \
   --path.procfs=/host/proc \
   --path.sysfs=/host/sys \
   --path.rootfs=/rootfs \
+  --web.listen-address=:9100 \
   --collector.textfile.directory=/textfile_collector
 
 # Verify (should see both system metrics AND monad_triedb_* metrics)
 curl http://localhost:9100/metrics | grep monad_triedb
+
+> **Note:** To use a different port, change `--web.listen-address=:9100` to your desired port (e.g. `:9200`).
+> Don't forget to also update `node_exporter_port` in `validators.yaml` to match.
 ```
+
+> **Note:** `--network=host` is required for correct network interface names.
+> Without it, node_exporter reports the container's virtual `eth0` instead of
+> real host interfaces (e.g. `enp5s0`). Port mapping (`-p`) is not needed in
+> host mode — the container listens directly on the host's port 9100.
 
 ---
 
@@ -240,9 +252,12 @@ nano .env
 | `PUSHOVER_APP_TOKEN` | No | From pushover.net |
 | `DISCORD_WEBHOOK_URL` | No | Discord webhook URL |
 | `SLACK_WEBHOOK_URL` | No | Slack incoming webhook URL |
+| `DASHBOARD_PASSWORD` | No | Metrics dashboard password (empty = disabled) |
+| `DASHBOARD_JWT_SECRET` | No | JWT secret for metrics dashboard (`openssl rand -hex 32`) |
 | `TZ` | No | Timezone (default: UTC) |
 
 > At least one alert channel must be configured.
+> Metrics Dashboard requires both `DASHBOARD_PASSWORD` and `DASHBOARD_JWT_SECRET` to be set.
 
 Save: `Ctrl+O`, Exit: `Ctrl+X`
 
@@ -322,9 +337,9 @@ INFO ✅ My Monad Testnet: In-sync · Height: 15,079,199 · Peers: 204
 
 ---
 
-## Dashboard
+## Monitor Dashboard
 
-Your dashboard is running at: `http://your-server-ip:8282`
+Real-time validator status overview at: `http://your-server-ip:8282`
 
 ![Dashboard Preview](assets/dashboard.png)
 
@@ -347,16 +362,16 @@ Each validator card displays:
 
 ### Connect Your Domain (Optional)
 
-1. **Point your domain** (e.g., `monad.yourdomain.com`) to your server IP
+1. **Point your domain** (e.g., `monad-monitor.yourdomain.com`) to your server IP
 
 2. **Create nginx config:**
    ```bash
-   sudo nano /etc/nginx/sites-available/monad-dashboard
+   sudo nano /etc/nginx/sites-available/monad-monitor
    ```
 
    ```nginx
    server {
-       server_name monad.yourdomain.com;
+       server_name monad-monitor.yourdomain.com;
 
        location / {
            proxy_pass http://localhost:8282;
@@ -371,40 +386,144 @@ Each validator card displays:
 
 3. **Enable & test:**
    ```bash
-   sudo ln -s /etc/nginx/sites-available/monad-dashboard /etc/nginx/sites-enabled/
+   sudo ln -s /etc/nginx/sites-available/monad-monitor /etc/nginx/sites-enabled/
    sudo nginx -t && sudo systemctl reload nginx
    ```
 
 4. **Add SSL (recommended):**
    ```bash
-   sudo certbot --nginx -d monad.yourdomain.com
+   sudo certbot --nginx -d monad-monitor.yourdomain.com
    ```
+
+---
+
+## Metrics Dashboard
+
+Production-grade metrics dashboard with Prometheus time-series charts at `http://your-server-ip:8383`.
+
+### Setup
+
+1. Add to your `.env` file (see Step 4.1):
+   ```env
+   DASHBOARD_PASSWORD=your_secure_password
+   DASHBOARD_JWT_SECRET=<generate with: openssl rand -hex 32>
+   ```
+
+2. Restart services:
+   ```bash
+   docker compose up -d
+   ```
+
+3. Open `http://your-server:8383` and enter your password.
+
+> Prometheus starts automatically with `docker compose up` and scrapes validator metrics from `:8889` and `:9100`.
+
+### Overview
+
+After login, the dashboard shows **6 stat boxes** and **27 time-series charts** across **7 collapsible sections**:
+
+| Stat Box | Description |
+|----------|-------------|
+| **Node Status** | UP / DOWN with checkmark indicator |
+| **Block Height** | Current block height |
+| **Sync Status** | In-sync / behind percentage |
+| **Self Stake** | Your validator's stake percentage |
+| **Total Peers** | Connected peer count |
+| **Uptime** | Validator uptime percentage |
+
+### Chart Sections
+
+| Section | Charts | What You See |
+|---------|:------:|--------------|
+| **Consensus & Execution** | 7 | Block height, time, commit rate, proposals, TC ratio, leader changes |
+| **Peer & Network** | 3 | Connected peers, network I/O per interface |
+| **Raptorcast** | 4 | Decoding rate, cache hit ratio, queue depth, insertions |
+| **Txpool** | 3 | Pending/queued transactions, gas pricing |
+| **RPC** | 5 | Active requests, execution duration, call rate per method, wait time, per-method latency |
+| **Host** | 8 | CPU, memory, load, disk I/O, filesystem usage, NVMe temperature & wear level |
+| **TrieDB** | 1 | Fast/slow/free tier distribution |
+
+### Features
+
+- **Per-section time range selector** — 1m, 5m, 30m, 1h, All (independent per section)
+- **Tab-based validator selection** — One tab per configured validator
+- **Threshold lines** — Visual markers on block time, disk usage, NVMe temp & wear
+- **Multi-device support** — NVMe chips, disk devices, mountpoints, network interfaces shown separately
+- **30-second auto-refresh** — With countdown, pauses when tab is hidden
+- **JWT authentication** — httpOnly cookie, 24-hour expiry, password-protected
+- **Purple dark theme** — Consistent design across both dashboards
+- **Unit-formatted tooltips** — ms, %, bytes, ops/s displayed correctly
+- **Responsive design** — Works on mobile, tablet, desktop
+
+### Connect Your Domain (Optional)
+
+1. **Point your domain** (e.g., `monad-metrics.yourdomain.com`) to your server IP
+
+2. **Create nginx config:**
+   ```bash
+   sudo nano /etc/nginx/sites-available/monad-metrics
+   ```
+
+   ```nginx
+   server {
+       server_name monad-metrics.yourdomain.com;
+
+       location / {
+           proxy_pass http://localhost:8383;
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+       }
+
+       listen 80;
+   }
+   ```
+
+3. **Enable & test:**
+   ```bash
+   sudo ln -s /etc/nginx/sites-available/monad-metrics /etc/nginx/sites-enabled/
+   sudo nginx -t && sudo systemctl reload nginx
+   ```
+
+4. **Add SSL (recommended):**
+   ```bash
+   sudo certbot --nginx -d monad-metrics.yourdomain.com
+   ```
+
+### Disable
+
+Leave `DASHBOARD_PASSWORD` and `DASHBOARD_JWT_SECRET` empty (or remove them) to disable the metrics dashboard. All other services continue normally.
 
 ---
 
 ## Architecture
 
 ```
-┌────────────────────────────────────────┐
-│         MONITORING SERVER              │
-│                                        │
-│  Docker Container                      │
-│  ├── Monitor (checks validators)       │
-│  ├── Health Server :8181 (internal)    │
-│  └── Dashboard Server :8282            │
-│                                        │
-│  Nginx (optional)                      │
-│  └── domain.com → localhost:8282       │
-└────────────────┬───────────────────────┘
-                 │
-    ┌────────────┼────────────┐
-    ▼            ▼            ▼
-┌────────┐  ┌────────┐  ┌────────┐
-│Validator│  │Validator│  │Validator│
-│ :8889  │  │ :8889  │  │ :8889  │
-│ :8080  │  │ :8080  │  │ :8080  │
-│ :9100  │  │ :9100  │  │ :9100  │
-└────────┘  └────────┘  └────────┘
+┌─────────────────────────────────────────────────┐
+│              MONITORING SERVER                   │
+│                                                  │
+│  Docker Compose                                 │
+│  ├── Monitor Container                          │
+│  │   ├── Monitor (checks validators)            │
+│  │   ├── Health Server :8181 (internal)         │
+│  │   ├── Monitor Dashboard :8282                │
+│  │   └── Metrics Dashboard :8383 (FastAPI)      │
+│  │                                               │
+│  └── Prometheus Container :9090 (30d retention) │
+│                                                  │
+│  Nginx (optional)                               │
+│  ├── monad-monitor.domain.com → :8282           │
+│  └── monad-metrics.domain.com  → :8383          │
+└────────────────────┬────────────────────────────┘
+                     │
+       ┌─────────────┼─────────────┐
+       ▼             ▼             ▼
+┌──────────┐  ┌──────────┐  ┌──────────┐
+│Validator │  │Validator │  │Validator │
+│ :8889    │  │ :8889    │  │ :8889    │
+│ :8080    │  │ :8080    │  │ :8080    │
+│ :9100    │  │ :9100    │  │ :9100    │
+└──────────┘  └──────────┘  └──────────┘
 ```
 
 ---
@@ -434,11 +553,14 @@ curl -X POST "https://api.telegram.org/bot<TOKEN>/sendMessage" \
 ### Dashboard not loading
 
 ```bash
-# Check if port is exposed:
-docker compose logs | grep 8282
+# Check container logs:
+docker compose logs | grep -E "8282|8383"
 
-# Verify container is running:
+# Verify containers are running:
 docker compose ps
+
+# Metrics dashboard not working? Check env vars:
+docker compose exec monitor env | grep DASHBOARD
 ```
 
 ### Too many alerts
@@ -465,19 +587,21 @@ docker run --rm -v monitor-state:/data alpine ls -la /data
 
 ```
 micto-monad-monitor/
-├── .env                    # Your secrets (Telegram, Pushover, etc.)
-├── docker-compose.yaml     # Docker config
+├── .env                        # Your secrets (Telegram, Pushover, etc.)
+├── docker-compose.yaml         # Docker config
 ├── config/
-│   ├── config.yaml        # Settings (thresholds, intervals)
-│   └── validators.yaml    # Your validators
+│   ├── config.yaml            # Settings (thresholds, intervals)
+│   └── validators.yaml        # Your validators
 ├── scripts/
-│   └── triedb-collector.sh  # TrieDB metrics (run on validator)
+│   └── triedb-collector.sh    # TrieDB + NVMe metrics (run on validator)
 └── monad_monitor/
-    ├── main.py            # Entry point
-    ├── alerts.py          # Telegram, Pushover, Discord, Slack
-    ├── dashboard_server.py # Web dashboard (:8282)
-    ├── health_server.py   # Health API (:8181)
-    └── static/            # Dashboard frontend
+    ├── main.py                # Entry point
+    ├── alerts.py              # Telegram, Pushover, Discord, Slack
+    ├── dashboard_server.py    # Monitor dashboard (:8282)
+    ├── api_server.py          # Metrics dashboard API (:8383)
+    ├── health_server.py       # Health API (:8181)
+    ├── static/                # Monitor dashboard frontend
+    └── static_dashboard/      # Metrics dashboard frontend (Chart.js)
 ```
 
 ---
@@ -493,12 +617,24 @@ micto-monad-monitor/
 | `GET /live` | Liveness probe |
 | `GET /metrics` | Prometheus metrics |
 
-### Dashboard Server (:8282)
+### Monitor Dashboard (:8282)
 
 | Endpoint | Description |
 |----------|-------------|
 | `GET /` | Web dashboard UI |
 | `GET /health` | Health status (JSON) |
+
+### Metrics Dashboard (:8383)
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /api/auth/login` | Login with password, returns JWT cookie |
+| `POST /api/auth/logout` | Clear JWT cookie |
+| `GET /api/health` | Prometheus connectivity check |
+| `GET /api/validators` | List configured validators |
+| `GET /api/overview/{name}` | Stat box data for a validator |
+| `GET /api/metrics/{name}` | Raw metric values for a validator |
+| `GET /api/chart/{name}/{key}?range=1h` | Time-series chart data (ranges: 1m, 5m, 30m, 1h, All) |
 
 ---
 
@@ -521,11 +657,113 @@ micto-monad-monitor/
 
 ---
 
+## Updating
+
+### General Update Steps
+
+Every update follows the same pattern:
+
+```bash
+# 1. Pull the latest version
+docker compose pull          # Pre-built image (GHCR)
+# — OR —
+git pull                     # Build from source
+
+# 2. Stop and restart
+docker compose up -d
+
+# 3. Verify
+docker compose logs -f
+```
+
+> State files in `/app/state` are preserved across updates via Docker volume. No backup needed.
+
+### Pre-built vs Source
+
+| Method | Command | Use When |
+|--------|---------|----------|
+| **Pre-built (recommended)** | `docker compose pull && docker compose up -d` | Using GHCR image |
+| **Build from source** | `git pull && docker compose up -d --build` | Uncommented `build: .` in docker-compose.yaml |
+
+### Version-Specific Steps
+
+#### v1.3.0 → v1.4.0
+
+This update adds the **Metrics Dashboard** (:8383) with Prometheus charts. It's optional — your existing setup continues to work without any config changes.
+
+**New features:**
+- Metrics Dashboard with 27 Prometheus charts
+- Prometheus container (auto-starts with `docker compose up`)
+- Time range selector per chart section (1m, 5m, 30m, 1h, All)
+- Per-method RPC latency charts
+- NVMe temperature and wear level monitoring
+- Purple dark theme across both dashboards
+
+**Steps:**
+
+**On your validator server:**
+
+```bash
+# 1. Update the TrieDB collector script (adds NVMe SMART metrics)
+curl -o ~/monad-monitoring/scripts/triedb-collector.sh \
+  https://raw.githubusercontent.com/MictoNode/micto-monad-monitor/main/scripts/triedb-collector.sh
+chmod +x ~/monad-monitoring/scripts/triedb-collector.sh
+
+# 2. Recreate node-exporter with --network=host (required for correct interface names)
+docker stop node-exporter && docker rm node-exporter
+docker run -d \
+  --name node-exporter \
+  --restart unless-stopped \
+  --network=host \
+  -v /proc:/host/proc:ro \
+  -v /sys:/host/sys:ro \
+  -v /:/rootfs:ro \
+  -v /var/lib/node_exporter/textfile_collector:/textfile_collector \
+  prom/node-exporter:latest \
+  --path.procfs=/host/proc \
+  --path.sysfs=/host/sys \
+  --path.rootfs=/rootfs \
+  --web.listen-address=:9100 \
+  --collector.textfile.directory=/textfile_collector
+```
+
+> **Note:** To use a different port, change `--web.listen-address=:9100` to your desired port (e.g. `:9200`).
+> Don't forget to also update `node_exporter_port` in `validators.yaml` to match.
+
+**On your monitor server:**
+
+```bash
+# 3. Pull updated config files (required — adds Prometheus service + config)
+cd ~/micto-monad-monitor    # your monitor directory
+git pull
+
+# 4. Pull latest image
+docker compose pull
+
+# 5. (Optional) Enable Metrics Dashboard — add to your .env:
+#    DASHBOARD_PASSWORD=your_secure_password
+#    DASHBOARD_JWT_SECRET=<generate with: openssl rand -hex 32>
+nano .env
+
+# 6. Start all services (monitor + Prometheus)
+docker compose up -d
+
+# 7. Verify — check that both containers are running:
+docker compose ps
+```
+
+**What changes automatically:**
+- Prometheus container starts and scrapes `:8889` and `:9100`
+- Prometheus data stored in Docker volume (`prometheus-data`), 30-day retention
+- Monitor Dashboard (:8282) and Health Server (:8181) unchanged
+
+**No action needed if you don't want the Metrics Dashboard** — it stays disabled when `DASHBOARD_PASSWORD` is empty.
+
+---
+
 ## Support
 
 - **Issues:** [GitHub Issues](https://github.com/MictoNode/micto-monad-monitor/issues)
-- **Updates (pre-built):** `docker compose pull && docker compose up -d`
-- **Updates (build from source):** `git pull && docker compose up -d --build`
 
 ---
 

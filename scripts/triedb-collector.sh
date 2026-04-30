@@ -1,11 +1,12 @@
 #!/bin/bash
 #
-# TrieDB (MonadDB) Metrics Collector for Node Exporter Textfile Collector
-# This script collects Monad TrieDB disk usage metrics and exports them
+# TrieDB (MonadDB) + NVMe SMART Metrics Collector for Node Exporter Textfile Collector
+# This script collects Monad TrieDB disk usage and NVMe SMART metrics and exports them
 # in Prometheus format for node-exporter to scrape.
 #
 # Requirements:
 #   - monad-mpt binary in PATH or /usr/local/bin/
+#   - nvme-cli installed (nvme smart-log command)
 #   - node-exporter with textfile collector enabled
 #   - Write access to /var/lib/node_exporter/textfile_collector/
 #
@@ -230,6 +231,51 @@ TEMP_FILE=$(mktemp "${OUTPUT_DIR}/.monad_triedb.prom.XXXXXX")
         fi
     fi
 
+    # ── NVMe SMART metrics (wear level + temperature) ──
+    # Discover NVMe namespace devices dynamically, skip partitions
+    # Works with any naming: nvme0n1, nvme1n1, nvme-eui.xxxxx, etc.
+    mapfile -t NVME_DEVS < <(lsblk -d -n -o NAME -I 259 2>/dev/null | grep -vE 'p[0-9]+$')
+
+    NVME_WEAR_LINES=()
+    NVME_TEMP_LINES=()
+    for dev_name in "${NVME_DEVS[@]}"; do
+        [[ -n "$dev_name" ]] || continue
+        dev="/dev/$dev_name"
+        [[ -b "$dev" ]] || continue
+        smart_output=$(nvme smart-log "$dev" 2>/dev/null) || continue
+
+        # percentage_used (wear level) — 0% = brand new, 100% = end of life
+        pct_used=$(echo "$smart_output" | grep 'percentage_used' | grep -oE '[0-9]+' | head -1)
+        if [[ -n "$pct_used" ]]; then
+            pct_ratio=$(awk "BEGIN {printf \"%.4f\", $pct_used / 100}")
+            NVME_WEAR_LINES+=("nvme_percentage_used_ratio{device=\"$dev_name\"} $pct_ratio")
+        fi
+
+        # Temperature from SMART log (format: "temperature : 27 °C (300 K)")
+        temp=$(echo "$smart_output" | grep '^temperature' | grep -oE '[0-9]+' | head -1)
+        if [[ -n "$temp" ]]; then
+            NVME_TEMP_LINES+=("nvme_temperature_celsius{device=\"$dev_name\"} $temp")
+        fi
+    done
+
+    # Print wear level metrics (grouped)
+    if [[ ${#NVME_WEAR_LINES[@]} -gt 0 ]]; then
+        printf "# HELP nvme_percentage_used_ratio NVMe SSD wear level (0=brand new, 1=end of life)\n"
+        printf "# TYPE nvme_percentage_used_ratio gauge\n"
+        for line in "${NVME_WEAR_LINES[@]}"; do
+            printf "%s\n" "$line"
+        done
+    fi
+
+    # Print temperature metrics (grouped)
+    if [[ ${#NVME_TEMP_LINES[@]} -gt 0 ]]; then
+        printf "# HELP nvme_temperature_celsius NVMe SSD temperature from SMART log\n"
+        printf "# TYPE nvme_temperature_celsius gauge\n"
+        for line in "${NVME_TEMP_LINES[@]}"; do
+            printf "%s\n" "$line"
+        done
+    fi
+
 } > "$TEMP_FILE"
 
 # Atomic move to final location
@@ -238,4 +284,4 @@ mv "$TEMP_FILE" "$OUTPUT_FILE"
 # Fix permissions so node-exporter (running as nobody/65534) can read the file
 chmod 644 "$OUTPUT_FILE"
 
-echo "$(date '+%Y-%m-%d %H:%M:%S') - TrieDB metrics collected: ${USED_PERCENT}% used (${USED_BYTES}/${CAPACITY_BYTES} bytes)"
+echo "$(date '+%Y-%m-%d %H:%M:%S') - TrieDB metrics collected: ${USED_PERCENT}% used (${USED_BYTES}/${CAPACITY_BYTES} bytes) | NVMe SMART collected"

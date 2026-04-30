@@ -125,6 +125,9 @@ class MetricsScraper:
             # Parse TrieDB metrics
             triedb_metrics = self._parse_triedb_metrics(raw)
 
+            # Parse NVMe SMART metrics
+            nvme_metrics = self._parse_nvme_metrics(raw)
+
             return {
                 # CPU
                 "cpu_idle_percent": cpu_idle,
@@ -141,6 +144,8 @@ class MetricsScraper:
                 "disk_percent": disk_metrics.get("percent"),
                 # TrieDB
                 "triedb": triedb_metrics,
+                # NVMe SMART
+                "nvme": nvme_metrics,
             }
         except requests.exceptions.RequestException:
             return {}
@@ -285,6 +290,23 @@ class MetricsScraper:
             result["history_count"] = int(history_count)
         if history_max is not None:
             result["history_max"] = int(history_max)
+
+        return result
+
+    def _parse_nvme_metrics(self, raw: str) -> Dict:
+        """Parse NVMe SMART metrics from node exporter textfile collector"""
+        result = {"nvme_wear": {}, "nvme_temp": {}}
+
+        wear_pattern = r'^nvme_percentage_used_ratio\{device="([^"]+)"\}\s+([\d.e+-]+)'
+        for match in re.finditer(wear_pattern, raw, re.MULTILINE):
+            device = match.group(1)
+            ratio = float(match.group(2))
+            result["nvme_wear"][device] = ratio * 100
+
+        temp_pattern = r'^nvme_temperature_celsius\{device="([^"]+)"\}\s+([\d.e+-]+)'
+        for match in re.finditer(temp_pattern, raw, re.MULTILINE):
+            device = match.group(1)
+            result["nvme_temp"][device] = float(match.group(2))
 
         return result
 

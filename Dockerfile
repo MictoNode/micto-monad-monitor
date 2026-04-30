@@ -8,6 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application
 COPY monad_monitor/ ./monad_monitor/
+COPY scripts/ ./scripts/
 COPY config/ ./config/
 
 # Create non-root user for security
@@ -22,4 +23,5 @@ ENV CONFIG_PATH=/app/config/config.yaml
 ENV VALIDATORS_PATH=/app/config/validators.yaml
 
 # Run the monitor
-CMD ["python", "-m", "monad_monitor.main"]
+RUN chmod +x /app/scripts/entrypoint.sh
+CMD ["/app/scripts/entrypoint.sh"]

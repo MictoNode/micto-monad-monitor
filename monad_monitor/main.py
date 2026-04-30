@@ -25,6 +25,7 @@ from .huginn import HuginnClient
 from .logger import init_logger, get_logger, debug, info, warning, error
 from .state_machine import ValidatorStateMachine, ValidatorState
 from .validator import ValidatorHealthChecker, SystemThresholds
+from .api_server import APIServer
 
 # Constants
 MAX_METRICS_HISTORY = 100  # Maximum entries per validator to prevent unbounded growth
@@ -133,6 +134,35 @@ def main():
         cross_validator = CrossValidator(huginn_client, gmonads_client)
         info("Cross-validation enabled - comparing Huginn and gmonads data")
 
+    # Initialize API server for monitoring dashboard (optional)
+    import os
+    api_password = os.getenv("DASHBOARD_PASSWORD", "")
+    api_jwt_secret = os.getenv("DASHBOARD_JWT_SECRET", "")
+    api_port = int(os.getenv("API_PORT", "8383"))
+    api_server = None
+
+    if api_password and api_jwt_secret:
+        validators_list = []
+        for vc in validators:
+            validators_list.append({
+                "name": vc.name,
+                "host": vc.host,
+                "network": getattr(vc, "network", "testnet"),
+                "metrics_port": getattr(vc, "metrics_port", 8889),
+                "node_exporter_port": getattr(vc, "node_exporter_port", None),
+            })
+        api_server = APIServer(
+            prometheus_url="http://prometheus:9090",
+            password=api_password,
+            jwt_secret=api_jwt_secret,
+            validators_config=validators_list,
+            port=api_port,
+        )
+        api_server.start()
+        info(f"API server started on 0.0.0.0:{api_port}")
+    else:
+        info("API server disabled (DASHBOARD_PASSWORD and DASHBOARD_JWT_SECRET not set)")
+
     # Initialize components
     alerts = AlertHandler(
         telegram_token=config["telegram"]["token"],
@@ -159,6 +189,8 @@ def main():
         memory_critical=thresholds_config.get("memory_critical", 95),
         disk_warning=thresholds_config.get("disk_warning", 85),
         disk_critical=thresholds_config.get("disk_critical", 95),
+        nvme_wear_warning=thresholds_config.get("nvme_wear_warning", 70),
+        nvme_wear_critical=thresholds_config.get("nvme_wear_critical", 95),
     )
 
     # State tracking for each validator
@@ -547,6 +579,10 @@ def main():
                 info(f"Saved state for {name}: {machine.current_state.value}")
             else:
                 warning(f"Failed to save state for {name}")
+
+        if api_server:
+            info("Stopping API server...")
+            api_server.stop()
 
         if dashboard_server:
             info("Stopping dashboard server...")

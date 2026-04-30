@@ -202,3 +202,58 @@ class TestValidatorConfig:
     ):
         """Test node_exporter_url is None when not configured"""
         assert sample_validator_config_no_node_exporter.node_exporter_url is None
+
+
+class TestNvmeThresholdCheck:
+    def test_nvme_wear_warning(self):
+        from monad_monitor.validator import SystemThresholds, ValidatorHealthChecker
+        thresholds = SystemThresholds(nvme_wear_warning=70.0, nvme_wear_critical=95.0)
+        system_metrics = {
+            "cpu_used_percent": 50.0,
+            "mem_percent": 50.0,
+            "disk_percent": 50.0,
+            "nvme": {"nvme_wear": {"nvme0n1": 75.0, "nvme1n1": 30.0}, "nvme_temp": {}},
+        }
+        checker = ValidatorHealthChecker.__new__(ValidatorHealthChecker)
+        checker.thresholds = thresholds
+        warnings, criticals = checker._check_system_thresholds(system_metrics)
+        assert any("nvme0n1" in w for w in warnings)
+        assert not any("nvme1n1" in w for w in warnings)
+        assert criticals == []
+
+    def test_nvme_wear_critical(self):
+        from monad_monitor.validator import SystemThresholds, ValidatorHealthChecker
+        thresholds = SystemThresholds(nvme_wear_warning=70.0, nvme_wear_critical=95.0)
+        system_metrics = {
+            "cpu_used_percent": 50.0,
+            "mem_percent": 50.0,
+            "disk_percent": 50.0,
+            "nvme": {"nvme_wear": {"nvme0n1": 96.0}, "nvme_temp": {}},
+        }
+        checker = ValidatorHealthChecker.__new__(ValidatorHealthChecker)
+        checker.thresholds = thresholds
+        warnings, criticals = checker._check_system_thresholds(system_metrics)
+        assert any("nvme0n1" in c for c in criticals)
+
+    def test_nvme_wear_no_alert_when_ok(self):
+        from monad_monitor.validator import SystemThresholds, ValidatorHealthChecker
+        thresholds = SystemThresholds()
+        system_metrics = {
+            "cpu_used_percent": 50.0,
+            "nvme": {"nvme_wear": {"nvme0n1": 1.0, "nvme1n1": 0.0}, "nvme_temp": {}},
+        }
+        checker = ValidatorHealthChecker.__new__(ValidatorHealthChecker)
+        checker.thresholds = thresholds
+        warnings, criticals = checker._check_system_thresholds(system_metrics)
+        assert not any("nvme" in w.lower() for w in warnings)
+        assert not any("nvme" in c.lower() for c in criticals)
+
+    def test_nvme_wear_missing_key(self):
+        from monad_monitor.validator import SystemThresholds, ValidatorHealthChecker
+        thresholds = SystemThresholds()
+        system_metrics = {"cpu_used_percent": 50.0}
+        checker = ValidatorHealthChecker.__new__(ValidatorHealthChecker)
+        checker.thresholds = thresholds
+        warnings, criticals = checker._check_system_thresholds(system_metrics)
+        assert warnings == []
+        assert criticals == []

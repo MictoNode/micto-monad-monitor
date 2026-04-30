@@ -56,6 +56,17 @@ node_filesystem_size_bytes{mount="/"} 107374182400
 node_filesystem_avail_bytes{mount="/"} 53687091200
 """
 
+NVME_METRICS = """
+# HELP nvme_percentage_used_ratio NVMe SSD wear level (0=brand new, 1=end of life)
+# TYPE nvme_percentage_used_ratio gauge
+nvme_percentage_used_ratio{device="nvme0n1"} 0.0000
+nvme_percentage_used_ratio{device="nvme1n1"} 0.0100
+# HELP nvme_temperature_celsius NVMe SSD temperature from SMART log
+# TYPE nvme_temperature_celsius gauge
+nvme_temperature_celsius{device="nvme0n1"} 27
+nvme_temperature_celsius{device="nvme1n1"} 24
+"""
+
 
 class TestMetricsScraper:
     """Test cases for MetricsScraper"""
@@ -376,8 +387,8 @@ node_cpu_seconds_total{cpu="0",mode="system"} 100
     def test_parse_disk_metrics(self, metrics_scraper):
         """Test disk metrics parsing"""
         raw = """
-node_filesystem_size_bytes{mount="/"} 100000
-node_filesystem_avail_bytes{mount="/"} 25000
+node_filesystem_size_bytes{device="/dev/sda1",fstype="ext4",mountpoint="/"} 100000
+node_filesystem_avail_bytes{device="/dev/sda1",fstype="ext4",mountpoint="/"} 25000
 """
         result = metrics_scraper._parse_disk_metrics(raw)
 
@@ -547,3 +558,36 @@ class TestGetValidatorStatusGmonadsFallback:
 
             # Should fall back to local inference
             assert result["source"] == "inference"
+
+
+class TestNvmeMetrics:
+    def test_parse_nvme_metrics_multi_device(self):
+        scraper = MetricsScraper(metrics_url="", rpc_url="")
+        raw = NODE_EXPORTER_METRICS + NVME_METRICS
+        result = scraper._parse_nvme_metrics(raw)
+        assert result["nvme_wear"]["nvme0n1"] == 0.0
+        assert result["nvme_wear"]["nvme1n1"] == 1.0
+        assert result["nvme_temp"]["nvme0n1"] == 27
+        assert result["nvme_temp"]["nvme1n1"] == 24
+
+    def test_parse_nvme_metrics_empty(self):
+        scraper = MetricsScraper(metrics_url="", rpc_url="")
+        result = scraper._parse_nvme_metrics("")
+        assert result["nvme_wear"] == {}
+        assert result["nvme_temp"] == {}
+
+    def test_parse_nvme_metrics_single_device(self):
+        scraper = MetricsScraper(metrics_url="", rpc_url="")
+        raw = 'nvme_percentage_used_ratio{device="nvme0n1"} 0.0500\nnvme_temperature_celsius{device="nvme0n1"} 42\n'
+        result = scraper._parse_nvme_metrics(raw)
+        assert result["nvme_wear"]["nvme0n1"] == 5.0
+        assert result["nvme_temp"]["nvme0n1"] == 42
+
+    def test_get_system_metrics_includes_nvme(self):
+        scraper = MetricsScraper(metrics_url="", rpc_url="")
+        combined = NODE_EXPORTER_METRICS + NVME_METRICS
+        with responses.RequestsMock() as rsps:
+            rsps.add(responses.GET, "http://test:9100/metrics", body=combined, status=200)
+            result = scraper.get_system_metrics("http://test:9100/metrics")
+        assert "nvme" in result
+        assert result["nvme"]["nvme_wear"]["nvme1n1"] == 1.0

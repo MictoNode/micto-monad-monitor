@@ -261,6 +261,24 @@ class HealthReporter:
                         disk_emoji = "🔴" if disk_percent >= 90 else "🟡" if disk_percent >= 80 else "🟢"
                         report_lines.append(f"   {disk_emoji} OS Disk: {disk_percent:.1f}%")
 
+                    # NVMe Wear Level (per-device)
+                    nvme_data = sys_metrics.get("nvme", {})
+                    nvme_wear = nvme_data.get("nvme_wear", {})
+                    nvme_temp = nvme_data.get("nvme_temp", {})
+                    for device in sorted(set(list(nvme_wear.keys()) + list(nvme_temp.keys()))):
+                        wear = nvme_wear.get(device)
+                        temp = nvme_temp.get(device)
+                        parts = []
+                        if wear is not None:
+                            nvme_emoji = "🔴" if wear >= 95 else "🟡" if wear >= 70 else "🟢"
+                            parts.append(f"Wear {wear:.1f}%")
+                        else:
+                            nvme_emoji = "🟢"
+                        if temp is not None:
+                            parts.append(f"Temp {temp:.0f}°C")
+                        if parts:
+                            report_lines.append(f"   {nvme_emoji} NVMe {device}: {' | '.join(parts)}")
+
             report_lines.append("")
 
         # Summary

@@ -40,6 +40,8 @@ class SystemThresholds:
     memory_critical: float = 95.0
     disk_warning: float = 85.0
     disk_critical: float = 95.0
+    nvme_wear_warning: float = 70.0
+    nvme_wear_critical: float = 95.0
 
 
 class ValidatorHealthChecker:
@@ -276,6 +278,15 @@ class ValidatorHealthChecker:
                 criticals.append(f"Disk critical: {disk_percent:.1f}%")
             elif disk_percent >= self.thresholds.disk_warning:
                 warnings.append(f"Disk warning: {disk_percent:.1f}%")
+
+        # NVMe wear level check (per-device)
+        nvme_data = system_metrics.get("nvme", {})
+        nvme_wear = nvme_data.get("nvme_wear", {})
+        for device, wear_percent in nvme_wear.items():
+            if wear_percent >= self.thresholds.nvme_wear_critical:
+                criticals.append(f"NVMe {device} wear: {wear_percent:.1f}%")
+            elif wear_percent >= self.thresholds.nvme_wear_warning:
+                warnings.append(f"NVMe {device} wear: {wear_percent:.1f}%")
 
         return warnings, criticals
 
