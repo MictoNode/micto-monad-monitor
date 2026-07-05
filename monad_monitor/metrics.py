@@ -364,7 +364,7 @@ class MetricsScraper:
             if uptime:
                 # If Huginn provided a definitive status (is_active is not None), use it
                 if uptime.is_active is not None:
-                    return {
+                    huginn_result = {
                         "is_active": uptime.is_active,
                         "reason": (
                             f"Verified via Huginn API: {uptime.total_events} events, "
@@ -379,6 +379,31 @@ class MetricsScraper:
                         "last_block_height": uptime.last_block_height,
                         "huginn_data": uptime.to_dict(),
                     }
+
+                    if gmonads_client:
+                        gmonads_is_active = gmonads_client.is_validator_in_active_set(
+                            validator_secp, network
+                        )
+                        if gmonads_is_active is not None and gmonads_is_active != uptime.is_active:
+                            logger.warning(
+                                "Active set sources disagree for %s... on %s: "
+                                "Huginn=%s, gmonads=%s. Using gmonads current epoch.",
+                                validator_secp[:16],
+                                network,
+                                uptime.is_active,
+                                gmonads_is_active,
+                            )
+                            return {
+                                **huginn_result,
+                                "is_active": gmonads_is_active,
+                                "reason": (
+                                    "Verified via gmonads current epoch; "
+                                    f"Huginn reported is_active={uptime.is_active}"
+                                ),
+                                "source": "gmonads_api",
+                            }
+
+                    return huginn_result
                 else:
                     # Huginn status field missing — fall back to gmonads
                     logger.info(

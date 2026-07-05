@@ -456,6 +456,42 @@ class TestGetValidatorStatusGmonadsFallback:
         assert result["is_active"] is False
         assert result["source"] == "gmonads_api"
 
+    def test_gmonads_overrides_huginn_when_sources_disagree(self, sample_validator_config):
+        """Current epoch data should override stale Huginn active status."""
+        from unittest.mock import MagicMock
+
+        scraper = MetricsScraper(
+            metrics_url=sample_validator_config.metrics_url,
+            rpc_url=sample_validator_config.rpc_url,
+        )
+
+        mock_uptime = MagicMock()
+        mock_uptime.is_active = True
+        mock_uptime.total_events = 0
+        mock_uptime.uptime_percent = 0.0
+        mock_uptime.finalized_count = 0
+        mock_uptime.timeout_count = 0
+        mock_uptime.last_round = 42655653
+        mock_uptime.last_block_height = 42249566
+        mock_uptime.to_dict.return_value = {"is_active": True, "total_events": 0}
+
+        mock_huginn = MagicMock()
+        mock_huginn.get_validator_uptime.return_value = mock_uptime
+
+        mock_gmonads = MagicMock()
+        mock_gmonads.is_validator_in_active_set.return_value = False
+
+        result = scraper.get_validator_status(
+            validator_secp="03c480ab1fc0f25df146e210bbb0b83e51111389fe07e620c21a8ac74f966cd349",
+            huginn_client=mock_huginn,
+            network="testnet",
+            gmonads_client=mock_gmonads,
+        )
+
+        assert result["is_active"] is False
+        assert result["source"] == "gmonads_api"
+        assert result["huginn_data"] == {"is_active": True, "total_events": 0}
+
     def test_gmonads_fallback_to_inference_when_both_fail(self, sample_validator_config):
         """Test that local inference is used when both Huginn and gmonads fail"""
         from unittest.mock import MagicMock
@@ -491,8 +527,8 @@ class TestGetValidatorStatusGmonadsFallback:
             # Should fall back to local inference
             assert result["source"] == "inference"
 
-    def test_gmonads_not_called_when_huginn_succeeds(self, sample_validator_config):
-        """Test that gmonads is NOT called when Huginn succeeds"""
+    def test_huginn_result_kept_when_gmonads_agrees(self, sample_validator_config):
+        """Test that Huginn details are kept when gmonads agrees."""
         from unittest.mock import MagicMock
 
         scraper = MetricsScraper(
@@ -524,8 +560,8 @@ class TestGetValidatorStatusGmonadsFallback:
         assert result["source"] == "huginn_api"
         assert result["is_active"] is True
 
-        # gmonads should NOT have been called
-        mock_gmonads.is_validator_in_active_set.assert_not_called()
+        # gmonads should be called to catch stale Huginn active-set status
+        mock_gmonads.is_validator_in_active_set.assert_called_once_with("02abc123", "testnet")
 
     def test_no_gmonads_client_uses_inference(self, sample_validator_config):
         """Test that local inference is used when gmonads_client is not provided"""
