@@ -554,10 +554,12 @@
     let validators = [];
     let activeValidator = null;
     let charts = {};          // canvasId -> Chart instance
+    let chartSeq = {};        // canvasId -> latest update generation (race guard)
     let countdownInterval = null;
     let countdown = REFRESH_INTERVAL;
     let isHidden = false;
     let sectionRanges = {};  // sectionId -> "1h" | "5m" | etc.
+    let refreshing = false;
 
     document.addEventListener('visibilitychange', () => {
       isHidden = document.hidden;
@@ -1119,6 +1121,7 @@
         scales: {
           x: {
             type: 'time',
+            bounds: 'data',
             display: true,
             grid: { color: 'rgba(255, 255, 255, 0.05)' },
             time: {
@@ -1136,6 +1139,7 @@
               }
             },
             ticks: {
+              source: 'data',
               color: '#6B6880',
               font: { size: 10 },
               maxTicksLimit: 8,
@@ -1260,6 +1264,7 @@
         scales: {
           x: {
             type: 'time',
+            bounds: 'data',
             display: true,
             grid: { color: 'rgba(255, 255, 255, 0.05)' },
             time: {
@@ -1277,6 +1282,7 @@
               }
             },
             ticks: {
+              source: 'data',
               color: '#A8A4B8',
               font: { size: 13 },
               maxTicksLimit: 12,
@@ -1578,9 +1584,13 @@
       const chart = charts[def.id];
       if (!chart) return;
 
+      // Generation counter: only the latest update may apply, so overlapping
+      // refreshes (slow "all" queries) cannot interleave and corrupt charts.
+      const mySeq = (chartSeq[def.id] = (chartSeq[def.id] || 0) + 1);
+
       // For multi-result charts or single-key charts, we handle differently
       if (def.multiResult) {
-        await updateMultiResultChart(def, chart, enc, range);
+        await updateMultiResultChart(def, chart, enc, range, mySeq);
         return;
       }
 
@@ -1593,6 +1603,7 @@
       );
 
       const allSeries = await Promise.all(fetches);
+      if (chartSeq[def.id] !== mySeq) return;
 
       // Each dataset carries its own timestamps ({x, y}), so series align by
       // real time even when metrics have different data coverage.
@@ -1613,7 +1624,7 @@
       chart.update('none');
     }
 
-    async function updateMultiResultChart(def, chart, enc, range) {
+    async function updateMultiResultChart(def, chart, enc, range, mySeq) {
       // For multi-result charts, we may need to rebuild datasets dynamically
       const keys = def.keys;
       const fetches = keys.map(key =>
@@ -1624,6 +1635,7 @@
       );
 
       const allSeries = await Promise.all(fetches);
+      if (chartSeq[def.id] !== mySeq) return;
 
       // Build datasets dynamically
       const newDatasets = [];
@@ -1719,9 +1731,14 @@
     }
 
     async function refresh() {
-      if (isHidden) return;
-      await fetchOverview();
-      await updateCharts();
+      if (isHidden || refreshing) return;
+      refreshing = true;
+      try {
+        await fetchOverview();
+        await updateCharts();
+      } finally {
+        refreshing = false;
+      }
     }
 
     /* ──────────────────────────────────────────────────────
