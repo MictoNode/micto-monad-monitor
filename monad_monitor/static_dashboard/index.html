@@ -6,6 +6,7 @@
   <title>MONAD Nodes Metrics</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23836EF9' d='M12 3c-2.599 0-9 6.4-9 9s6.401 9 9 9s9-6.401 9-9s-6.401-9-9-9m-1.402 14.146c-1.097-.298-4.043-5.453-3.744-6.549s5.453-4.042 6.549-3.743c1.095.298 4.042 5.453 3.743 6.549c-.298 1.095-5.453 4.042-6.549 3.743'/%3E%3C/svg%3E">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
   <style>
     :root {
       --bg-primary: #0E091C;
@@ -386,10 +387,21 @@
     .fs-body {
       flex: 1;
       min-height: 0;
-      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
 
-    .fs-body canvas {
+    .fs-chart-wrap {
+      position: relative;
+      width: 100%;
+      height: auto;
+      max-width: 100%;
+      max-height: 100%;
+      aspect-ratio: 16 / 9;
+    }
+
+    .fs-chart-wrap canvas {
       position: absolute;
       inset: 0;
       width: 100% !important;
@@ -1106,8 +1118,23 @@
         },
         scales: {
           x: {
+            type: 'time',
             display: true,
             grid: { color: 'rgba(255, 255, 255, 0.05)' },
+            time: {
+              tooltipFormat: 'MMM d, yyyy HH:mm',
+              displayFormats: {
+                millisecond: 'HH:mm:ss.SSS',
+                second: 'HH:mm:ss',
+                minute: 'HH:mm',
+                hour: 'HH:mm',
+                day: 'MMM d',
+                week: 'MMM d',
+                month: 'MMM yyyy',
+                quarter: 'MMM yyyy',
+                year: 'yyyy'
+              }
+            },
             ticks: {
               color: '#6B6880',
               font: { size: 10 },
@@ -1128,7 +1155,6 @@
           }
         }
       };
-      if (def.stacked) opts.scales.x = { ...opts.scales.x, stacked: true };
       return opts;
     }
 
@@ -1233,8 +1259,23 @@
         },
         scales: {
           x: {
+            type: 'time',
             display: true,
             grid: { color: 'rgba(255, 255, 255, 0.05)' },
+            time: {
+              tooltipFormat: 'MMM d, yyyy HH:mm',
+              displayFormats: {
+                millisecond: 'HH:mm:ss.SSS',
+                second: 'HH:mm:ss',
+                minute: 'HH:mm',
+                hour: 'HH:mm',
+                day: 'MMM d',
+                week: 'MMM d',
+                month: 'MMM yyyy',
+                quarter: 'MMM yyyy',
+                year: 'yyyy'
+              }
+            },
             ticks: {
               color: '#A8A4B8',
               font: { size: 13 },
@@ -1255,7 +1296,6 @@
           }
         }
       };
-      if (def.stacked) opts.scales.x = { ...opts.scales.x, stacked: true };
       return opts;
     }
 
@@ -1303,8 +1343,11 @@
         nd.textContent = 'Waiting for data…';
         body.appendChild(nd);
       } else {
+        const wrap = document.createElement('div');
+        wrap.className = 'fs-chart-wrap';
         const canvas = document.createElement('canvas');
-        body.appendChild(canvas);
+        wrap.appendChild(canvas);
+        body.appendChild(wrap);
       }
 
       fsOverlay.appendChild(body);
@@ -1329,7 +1372,7 @@
 
       fsChart = new Chart(canvas.getContext('2d'), {
         type: 'line',
-        data: { labels: src.data.labels.slice(), datasets },
+        data: { datasets },
         options: fsChartOpts(def)
       });
     }
@@ -1551,30 +1594,18 @@
 
       const allSeries = await Promise.all(fetches);
 
-      // Use the longest series for timestamps
-      let longestLabels = [];
-      allSeries.forEach((seriesList, i) => {
-        if (seriesList.length > 0 && seriesList[0].values.length > longestLabels.length) {
-          longestLabels = seriesList[0].values;
-        }
-      });
-
-      if (longestLabels.length > 0) {
-        chart.data.labels = longestLabels.map(p =>
-          new Date(p[0] * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-        );
-      }
-
-      // Map each key's series[0].values to the corresponding dataset
+      // Each dataset carries its own timestamps ({x, y}), so series align by
+      // real time even when metrics have different data coverage.
       let hasAnyData = false;
       allSeries.forEach((seriesList, i) => {
-        if (i < chart.data.datasets.length && seriesList.length > 0) {
-          const vals = seriesList[0].values;
-          chart.data.datasets[i].data = vals.map(p => {
-            const v = def.transform ? def.transform(p[1]) : p[1];
-            return v;
-          });
-          if (vals.length > 0) hasAnyData = true;
+        if (i < chart.data.datasets.length) {
+          chart.data.datasets[i].data = seriesList.length > 0
+            ? seriesList[0].values.map(p => ({
+                x: p[0] * 1000,
+                y: def.transform ? def.transform(p[1]) : p[1]
+              }))
+            : [];
+          if (chart.data.datasets[i].data.length > 0) hasAnyData = true;
         }
       });
 
@@ -1596,7 +1627,6 @@
 
       // Build datasets dynamically
       const newDatasets = [];
-      let longestLabels = [];
       let colorCounter = 0;
 
       keys.forEach((key, ki) => {
@@ -1630,7 +1660,7 @@
         const discrimLabels = Object.keys(labelValues)
           .filter(k => !skipLabels.has(k) && labelValues[k].size > 1);
 
-        seriesList.forEach((series, si) => {
+        seriesList.forEach((series) => {
           const labels = series.labels || {};
           let discrim = '';
           for (const k of discrimLabels) {
@@ -1639,17 +1669,13 @@
           const baseLabel = def.seriesLabels[ki] || key;
           const dsLabel = discrim ? baseLabel + ' (' + discrim + ')' : baseLabel;
 
-          if (series.values.length > longestLabels.length) {
-            longestLabels = series.values;
-          }
-
           const ci = colorCounter++;
           newDatasets.push({
             label: dsLabel,
-            data: series.values.map(p => {
-              const v = def.transform ? def.transform(p[1]) : p[1];
-              return v;
-            }),
+            data: series.values.map(p => ({
+              x: p[0] * 1000,
+              y: def.transform ? def.transform(p[1]) : p[1]
+            })),
             borderColor: nextColor(ci),
             backgroundColor: def.stacked ? nextColor(ci) + '4D' : nextColor(ci) + '15',
             borderWidth: 1.5,
@@ -1659,12 +1685,6 @@
           });
         });
       });
-
-      if (longestLabels.length > 0) {
-        chart.data.labels = longestLabels.map(p =>
-          new Date(p[0] * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-        );
-      }
 
       const hasAnyData = newDatasets.some(ds => ds.data.length > 0);
       showChartNoData(def.id, !hasAnyData);
