@@ -318,7 +318,9 @@ class TestTimeRange:
             "5m": (300, "5s"),
             "30m": (1800, "15s"),
             "1h": (3600, "30s"),
-            "all": (2592000, "300s"),
+            "24h": (86400, "60s"),
+            "1w": (604800, "300s"),
+            "1mo": (2592000, "600s"),
         }
         for key, (secs, step) in expected.items():
             assert key in _RANGE_CONFIG, f"Missing range: {key}"

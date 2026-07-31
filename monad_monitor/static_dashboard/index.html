@@ -486,6 +486,7 @@
       .range-selector {
         order: 5;
         margin-left: auto;
+        flex-wrap: wrap;
       }
       .range-selector button {
         font-size: 11px;
@@ -1002,9 +1003,9 @@
         const rangeSel = document.createElement('div');
         rangeSel.className = 'range-selector';
         rangeSel.dataset.section = section.id;
-        ['1m','5m','30m','1h','all'].forEach(r => {
+        ['1m','5m','30m','1h','24h','1w','1mo'].forEach(r => {
           const btn = document.createElement('button');
-          btn.textContent = r === 'all' ? 'All' : r;
+          btn.textContent = r;
           btn.dataset.range = r;
           if (r === '1h') btn.classList.add('active');
           btn.addEventListener('click', (e) => {
@@ -1083,6 +1084,21 @@
     /* ──────────────────────────────────────────────────────
        Chart Creation
     ────────────────────────────────────────────────────── */
+    // Ensure the first/last x tick labels sit at the actual data bounds, so
+    // the right edge always shows the most recent timestamp ("today"), not a
+    // decimated intermediate point that looks stale.
+    function forceEndTicks(axis) {
+      const ticks = axis.ticks;
+      if (!ticks || ticks.length < 2) return;
+      if (axis.min != null && ticks[0].value !== axis.min) {
+        ticks[0] = { value: axis.min };
+      }
+      const last = ticks[ticks.length - 1];
+      if (axis.max != null && last.value !== axis.max) {
+        ticks[ticks.length - 1] = { value: axis.max };
+      }
+    }
+
     function baseChartOpts(def) {
       const opts = {
         responsive: true,
@@ -1139,12 +1155,12 @@
               }
             },
             ticks: {
-              source: 'data',
               color: '#6B6880',
               font: { size: 10 },
               maxTicksLimit: 8,
               maxRotation: 0
-            }
+            },
+            afterBuildTicks: forceEndTicks
           },
           y: {
             grid: { color: 'rgba(255, 255, 255, 0.05)' },
@@ -1282,12 +1298,12 @@
               }
             },
             ticks: {
-              source: 'data',
               color: '#A8A4B8',
               font: { size: 13 },
               maxTicksLimit: 12,
               maxRotation: 0
-            }
+            },
+            afterBuildTicks: forceEndTicks
           },
           y: {
             grid: { color: 'rgba(255, 255, 255, 0.05)' },
