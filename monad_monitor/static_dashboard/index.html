@@ -313,6 +313,98 @@
       font-size: 13px;
     }
 
+    /* ─── Fullscreen chart ─── */
+    .expand-btn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg-card);
+      border: 1px solid var(--border-solid);
+      border-radius: 6px;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 0;
+      z-index: 2;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+      transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+    }
+
+    .expand-btn:hover { color: var(--text-primary); border-color: var(--accent); background: var(--accent-muted); }
+    .expand-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    @media (max-width: 768px) {
+      .expand-btn { width: 40px; height: 40px; top: 8px; right: 8px; }
+    }
+
+    .fs-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      background: var(--bg-primary);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 16px;
+    }
+
+    .fs-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+
+    .fs-title { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+    .fs-desc { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+    .fs-close-btn {
+      width: 40px;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg-card);
+      border: 1px solid var(--border-solid);
+      border-radius: 8px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 18px;
+      line-height: 1;
+      flex-shrink: 0;
+      transition: color 0.15s ease, border-color 0.15s ease;
+    }
+
+    .fs-close-btn:hover { color: var(--text-primary); border-color: var(--status-down); }
+    .fs-close-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    .fs-body {
+      flex: 1;
+      min-height: 0;
+      position: relative;
+    }
+
+    .fs-body canvas {
+      position: absolute;
+      inset: 0;
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    .fs-no-data {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+
     /* ─── Footer ─── */
     .footer {
       text-align: center;
@@ -946,6 +1038,17 @@
           canvas.id = 'chart-' + chartDef.id;
           card.appendChild(canvas);
 
+          const expand = document.createElement('button');
+          expand.className = 'expand-btn';
+          expand.title = 'View fullscreen';
+          expand.setAttribute('aria-label', 'View ' + chartDef.title + ' fullscreen');
+          expand.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>';
+          expand.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openFullscreen(chartDef);
+          });
+          card.appendChild(expand);
+
           body.appendChild(card);
         });
 
@@ -1085,6 +1188,162 @@
     }
 
     /* ──────────────────────────────────────────────────────
+       Fullscreen Chart
+    ────────────────────────────────────────────────────── */
+    let fsChart = null;
+    let fsOverlay = null;
+
+    function fsChartOpts(def) {
+      const opts = {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: {
+              color: '#A8A4B8',
+              font: { size: 13 },
+              boxWidth: 14,
+              padding: 12
+            }
+          },
+          tooltip: {
+            backgroundColor: '#14111F',
+            borderColor: '#1F1A2E',
+            borderWidth: 1,
+            titleColor: '#F8F7FC',
+            bodyColor: '#A8A4B8',
+            titleFont: { size: 14 },
+            bodyFont: { size: 14 },
+            padding: 10,
+            callbacks: {
+              label: function(ctx) {
+                let val = ctx.parsed.y;
+                if (val == null) return null;
+                if (def.yTick) {
+                  return ctx.dataset.label + ': ' + def.yTick(val);
+                }
+                return ctx.dataset.label + ': ' + val.toLocaleString(undefined, {maximumFractionDigits: 2});
+              }
+            }
+          },
+          thresholdLines: def.thresholds || []
+        },
+        scales: {
+          x: {
+            display: true,
+            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+            ticks: {
+              color: '#A8A4B8',
+              font: { size: 13 },
+              maxTicksLimit: 12,
+              maxRotation: 0
+            }
+          },
+          y: {
+            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+            ticks: {
+              color: '#A8A4B8',
+              font: { size: 13 },
+              callback: def.yTick ? (v => def.yTick(v)) : undefined
+            },
+            beginAtZero: def.stacked ? true : undefined,
+            max: def.yMax || undefined,
+            stacked: def.stacked || false
+          }
+        }
+      };
+      if (def.stacked) opts.scales.x = { ...opts.scales.x, stacked: true };
+      return opts;
+    }
+
+    function openFullscreen(def) {
+      if (fsOverlay) return;
+      const src = charts[def.id];
+      if (!src) return;
+
+      const hasData = src.data.datasets.some(ds => ds.data.length > 0);
+
+      fsOverlay = document.createElement('div');
+      fsOverlay.className = 'fs-overlay';
+
+      const header = document.createElement('div');
+      header.className = 'fs-header';
+
+      const titleWrap = document.createElement('div');
+      const title = document.createElement('div');
+      title.className = 'fs-title';
+      title.textContent = def.title;
+      titleWrap.appendChild(title);
+      if (def.desc) {
+        const desc = document.createElement('div');
+        desc.className = 'fs-desc';
+        desc.textContent = def.desc;
+        titleWrap.appendChild(desc);
+      }
+      header.appendChild(titleWrap);
+
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'fs-close-btn';
+      closeBtn.setAttribute('aria-label', 'Close fullscreen');
+      closeBtn.textContent = '✕';
+      closeBtn.addEventListener('click', closeFullscreen);
+      header.appendChild(closeBtn);
+
+      fsOverlay.appendChild(header);
+
+      const body = document.createElement('div');
+      body.className = 'fs-body';
+
+      if (!hasData) {
+        const nd = document.createElement('div');
+        nd.className = 'fs-no-data';
+        nd.textContent = 'Waiting for data…';
+        body.appendChild(nd);
+      } else {
+        const canvas = document.createElement('canvas');
+        body.appendChild(canvas);
+      }
+
+      fsOverlay.appendChild(body);
+      document.body.appendChild(fsOverlay);
+      fsOverlay.addEventListener('click', (e) => {
+        if (e.target === fsOverlay) closeFullscreen();
+      });
+
+      if (!hasData) return;
+
+      const canvas = body.querySelector('canvas');
+      const datasets = src.data.datasets.map(ds => ({
+        label: ds.label,
+        data: ds.data.slice(),
+        borderColor: ds.borderColor,
+        backgroundColor: ds.backgroundColor,
+        borderWidth: ds.borderWidth,
+        pointRadius: 0,
+        tension: def.discrete ? 0 : 0.3,
+        fill: def.stacked ? 'stack' : false
+      }));
+
+      fsChart = new Chart(canvas.getContext('2d'), {
+        type: 'line',
+        data: { labels: src.data.labels.slice(), datasets },
+        options: fsChartOpts(def)
+      });
+    }
+
+    function closeFullscreen() {
+      if (fsChart) { try { fsChart.destroy(); } catch (e) {} fsChart = null; }
+      if (fsOverlay) { fsOverlay.remove(); fsOverlay = null; }
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeFullscreen();
+    });
+
+    /* ──────────────────────────────────────────────────────
        Auth
     ────────────────────────────────────────────────────── */
     async function login() {
@@ -1110,6 +1369,7 @@
     function logout() {
       jwt = null;
       stopPolling();
+      closeFullscreen();
       fetch(API + '/api/auth/logout', { method: 'POST' }).catch(() => {});
       document.getElementById('password-input').value = '';
       document.getElementById('login-screen').style.display = 'flex';
