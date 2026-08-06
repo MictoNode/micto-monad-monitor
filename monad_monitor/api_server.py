@@ -200,6 +200,46 @@ def _step_seconds(step: str) -> int:
     return int(step.rstrip("s")) if step else 1
 
 
+# OpenTelemetry exporter metadata that changes on node/version upgrades. Series
+# that differ only in these labels represent the same logical metric and are
+# merged for continuity across upgrades.
+_VERSION_LABELS = frozenset({
+    "service_version", "service_name", "otel_scope_name",
+    "exported_job", "exported_network",
+})
+
+
+def _merge_version_series(results: list[dict]) -> list[dict]:
+    """Collapse duplicate series created by node/version upgrades.
+
+    A Monad upgrade (e.g. service_version 0.15.2 -> 0.16.0) makes Prometheus
+    create a fresh series under the same validator name while the old one goes
+    stale. Merge series that share the same identity (labels minus transient
+    version/otel metadata) into one time-sorted series, so charts stay
+    continuous across the upgrade instead of showing only the newest version.
+    """
+    groups: dict[frozenset, dict] = {}
+    order: list[frozenset] = []
+    for r in results:
+        labels = r.get("labels", {})
+        identity = frozenset((k, v) for k, v in labels.items() if k not in _VERSION_LABELS)
+        if identity not in groups:
+            groups[identity] = {"labels": dict(identity), "values": []}
+            order.append(identity)
+        groups[identity]["values"].extend(r.get("values", []))
+
+    merged = []
+    for ident in order:
+        by_ts: dict[float, float] = {}
+        for ts, v in groups[ident]["values"]:
+            by_ts[ts] = v
+        merged.append({
+            "labels": groups[ident]["labels"],
+            "values": sorted(by_ts.items()),
+        })
+    return merged
+
+
 class PrometheusClient:
     """Async client for Prometheus HTTP API with caching."""
 
@@ -284,9 +324,10 @@ class PrometheusClient:
                 "values": values,
             })
         # A node upgrade (or host change) creates a fresh Prometheus series under
-        # the same `name` label (e.g. service_version 0.15.0 -> 0.15.2) while the
-        # old series goes stale. Frontend single-series charts plot series[0], so
-        # put the freshest series first to always show current data.
+        # the same `name` label (e.g. service_version 0.15.2 -> 0.16.0) while the
+        # old series goes stale. Merge version-duplicate series so charts stay
+        # continuous, then put the freshest series first (frontend uses series[0]).
+        results = _merge_version_series(results)
         results.sort(key=lambda r: (r["values"][-1][0] if r["values"] else 0), reverse=True)
         self._range_cache[cache_key] = (now_ts, results)
         if len(self._range_cache) > 512:

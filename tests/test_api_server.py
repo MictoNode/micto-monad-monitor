@@ -413,8 +413,8 @@ class TestRangeCache:
         asyncio.run(run(700))   # crosses the 600s bucket boundary
         assert fake.calls == 2
 
-    def test_query_range_sorts_series_by_freshness(self, monkeypatch):
-        """Stale series (old service_version) sort after the freshest series."""
+    def test_query_range_merges_version_duplicate_series(self, monkeypatch):
+        """Series differing only in service_version merge into one continuous series."""
         import asyncio
         from monad_monitor.api_server import PrometheusClient
         p = PrometheusClient("http://prom:9090")
@@ -423,9 +423,13 @@ class TestRangeCache:
         base = 1785990000.0
         monkeypatch.setattr("monad_monitor.api_server.time.time", lambda: base)
         results = asyncio.run(p.query_range("up", range_param="1mo"))
-        # Frontend plots series[0]; it must be the current (freshest) series.
-        assert results[0]["labels"]["service_version"] == "0.15.2"
-        assert results[1]["labels"]["service_version"] == "0.15.0"
+        assert len(results) == 1
+        values = results[0]["values"]
+        assert len(values) == 6
+        assert values[0][0] == base - 2592000
+        assert values[-1][0] == base - 2592000 + 22 * 600
+        ts = [v[0] for v in values]
+        assert ts == sorted(ts)
 
     def test_api_responses_have_no_store_header(self):
         """All /api/* responses carry Cache-Control: no-store."""
