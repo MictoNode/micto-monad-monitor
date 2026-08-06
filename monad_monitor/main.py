@@ -1,5 +1,6 @@
 """Monad Validator Monitor - Main Entry Point"""
 
+import os
 import signal
 import sys
 import time
@@ -83,7 +84,7 @@ def main():
     # Initialize Health Server (HTTP endpoints for health checks and metrics)
     health_server_config = config.get("health_server", {})
     health_server_enabled = health_server_config.get("enabled", True)
-    health_server_port = health_server_config.get("port", 8181)
+    health_server_port = int(os.getenv("HEALTH_PORT", health_server_config.get("port", 8181)))
     health_server_host = health_server_config.get("host", "0.0.0.0")
 
     if health_server_enabled:
@@ -99,7 +100,7 @@ def main():
     # Initialize Dashboard Server (Web UI on port 8282)
     dashboard_server_config = config.get("dashboard_server", {})
     dashboard_server_enabled = dashboard_server_config.get("enabled", True)
-    dashboard_server_port = dashboard_server_config.get("port", 8282)
+    dashboard_server_port = int(os.getenv("DASHBOARD_PORT", dashboard_server_config.get("port", 8282)))
     dashboard_server_host = dashboard_server_config.get("host", "127.0.0.1")
 
     if dashboard_server_enabled:
@@ -137,7 +138,6 @@ def main():
         info("Cross-validation enabled - comparing Huginn and gmonads data")
 
     # Initialize API server for monitoring dashboard (optional)
-    import os
     api_password = os.getenv("DASHBOARD_PASSWORD", "")
     api_jwt_secret = os.getenv("DASHBOARD_JWT_SECRET", "")
     api_port = int(os.getenv("API_PORT", "8383"))
