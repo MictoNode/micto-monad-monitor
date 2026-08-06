@@ -98,6 +98,26 @@ class TestUpdateMessage:
         assert "1.5.0" in msg
         assert "1.4.8" in msg
 
+    def test_message_is_english(self):
+        msg = build_update_message("1.5.0", "1.4.8")
+        assert "New monitor version" in msg
+        assert "available (running:" in msg
+        assert "Update:" in msg
+        assert "yayınlandı" not in msg
+
+    def test_message_handles_v_prefixed_current(self):
+        """Current version baked from a git tag (e.g. v1.4.9) must not double the 'v' prefix."""
+        msg = build_update_message("1.5.0", "v1.4.9")
+        assert "v1.5.0" in msg
+        assert "v1.4.9" in msg
+        assert "vv1.4.9" not in msg
+
+    def test_message_handles_v_prefixed_latest(self):
+        """A v-prefixed latest tag (e.g. v1.5.0) renders as a single 'v'."""
+        msg = build_update_message("v1.5.0", "1.4.9")
+        assert "v1.5.0" in msg
+        assert "vv1.5.0" not in msg
+
     def test_message_contains_update_command(self):
         msg = build_update_message("1.5.0", "1.4.8")
         assert "git pull && docker compose pull && docker compose up -d" in msg

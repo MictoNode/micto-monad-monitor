@@ -53,9 +53,12 @@ def latest_release(tags: List[str]) -> Optional[str]:
 
 def build_update_message(latest: str, current: str) -> str:
     """Build the 'new version available' notification message."""
+    def _display(v: str) -> str:
+        return v[1:] if v[:1] in ("v", "V") else v
+
     return (
-        f"🆕 Yeni sürüm v{latest} yayınlandı (çalışan: v{current})\n\n"
-        f"Güncelleme:\n"
+        f"🆕 New monitor version v{_display(latest)} available (running: v{_display(current)})\n\n"
+        f"Update:\n"
         f"cd $HOME/micto-monad-monitor/ && git pull && docker compose pull && docker compose up -d"
     )
 
