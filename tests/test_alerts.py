@@ -772,6 +772,85 @@ class TestDiscordWebhook:
             assert result is True
 
 
+class TestUpdateAlert:
+    """Test cases for version update notification (no Pushover)"""
+
+    @pytest.fixture
+    def handler(self):
+        """Create AlertHandler with all channels configured"""
+        return AlertHandler(
+            telegram_token="test-telegram-token",
+            telegram_chat_id="test-chat-id",
+            pushover_user_key="test-user-key",
+            pushover_app_token="test-app-token",
+            discord_webhook_url="https://discord.com/api/webhooks/123/abc",
+            slack_webhook_url="https://hooks.slack.com/services/T123/B456/abc",
+        )
+
+    def test_alert_update_sends_telegram_discord_slack_not_pushover(self, handler):
+        """Test alert_update sends to Telegram+Discord+Slack but never Pushover"""
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.POST,
+                "https://api.telegram.org/bottest-telegram-token/sendMessage",
+                json={"ok": True},
+                status=200,
+            )
+            rsps.add(
+                responses.POST,
+                "https://discord.com/api/webhooks/123/abc",
+                body="",
+                status=204,
+            )
+            rsps.add(
+                responses.POST,
+                "https://hooks.slack.com/services/T123/B456/abc",
+                body="ok",
+                status=200,
+            )
+
+            result = handler.alert_update("New version available")
+
+            assert result is True
+            # Exactly 3 calls - Pushover endpoint is NOT registered, so any
+            # attempt to call it would raise a ConnectionError.
+            assert len(rsps.calls) == 3
+
+    def test_alert_update_contains_update_marker(self, handler):
+        """Test alert_update Telegram message contains UPDATE marker"""
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.POST,
+                "https://api.telegram.org/bottest-telegram-token/sendMessage",
+                json={"ok": True},
+                status=200,
+            )
+
+            handler.alert_update("New version available")
+
+            request_body = rsps.calls[0].request.body
+            assert "UPDATE" in str(request_body) or "update" in str(request_body).lower()
+
+    def test_alert_update_no_pushover_configured(self):
+        """Test alert_update with only Telegram configured still works"""
+        handler = AlertHandler(
+            telegram_token="test-telegram-token",
+            telegram_chat_id="test-chat-id",
+        )
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.POST,
+                "https://api.telegram.org/bottest-telegram-token/sendMessage",
+                json={"ok": True},
+                status=200,
+            )
+
+            result = handler.alert_update("New version available")
+
+            assert result is True
+            assert len(rsps.calls) == 1
+
+
 class TestSlackWebhook:
     """Test cases for Slack webhook integration"""
 

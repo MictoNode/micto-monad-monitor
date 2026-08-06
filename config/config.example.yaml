@@ -59,6 +59,14 @@ gmonads:
   check_interval: 120   # Cache duration in seconds (2 minutes)
   timeout: 10           # API request timeout
 
+# New Version Update Check
+# The monitor checks the published GHCR image tags weekly and notifies
+# (Telegram + Discord + Slack, Pushover excluded) when a newer release exists.
+updates:
+  enabled: true         # Set to false to disable the update check
+  check_interval: 604800 # Check frequency in seconds (default: weekly)
+  image: "ghcr.io/mictonode/micto-monad-monitor"
+
 # Logging Configuration
 logging:
   level: "INFO"         # DEBUG, INFO, WARNING, ERROR, CRITICAL

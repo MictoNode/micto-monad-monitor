@@ -442,3 +442,46 @@ class TestValidateValidators:
             )
         ]
         validate_validators(validators)
+
+
+class TestLoadUpdatesConfig:
+    """Test cases for load_updates_config function"""
+
+    def test_load_updates_config_defaults(self):
+        """Test load_updates_config returns defaults when section missing"""
+        yaml_content = """
+telegram:
+  token: "test"
+  chat_id: "test"
+"""
+        with patch("builtins.open", mock_open(read_data=yaml_content)):
+            with patch.dict(os.environ, {"CONFIG_PATH": "test.yaml"}):
+                from monad_monitor.config import load_updates_config
+
+                result = load_updates_config()
+
+        assert result["enabled"] is True
+        assert result["check_interval"] == 7 * 24 * 3600
+        assert result["image"] == "ghcr.io/mictonode/micto-monad-monitor"
+
+    def test_load_updates_config_explicit(self):
+        """Test load_updates_config reads explicit values"""
+        yaml_content = """
+telegram:
+  token: "test"
+  chat_id: "test"
+
+updates:
+  enabled: false
+  check_interval: 3600
+  image: "ghcr.io/mictonode/micto-monad-monitor"
+"""
+        with patch("builtins.open", mock_open(read_data=yaml_content)):
+            with patch.dict(os.environ, {"CONFIG_PATH": "test.yaml"}):
+                from monad_monitor.config import load_updates_config
+
+                result = load_updates_config()
+
+        assert result["enabled"] is False
+        assert result["check_interval"] == 3600
+        assert result["image"] == "ghcr.io/mictonode/micto-monad-monitor"

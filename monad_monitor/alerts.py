@@ -417,6 +417,28 @@ class AlertHandler:
         )
         return telegram_success or discord_success or slack_success
 
+    def alert_update(self, message: str) -> bool:
+        """Send version update notification (Telegram + Discord + Slack, rate limited)
+
+        Pushover is intentionally NOT used - it is reserved for critical/emergency
+        alerts, so update notices do not wake operators.
+
+        Returns:
+            True if sent successfully to at least one channel, False otherwise
+        """
+        telegram_success = self.send_telegram(f"🆕 *MONAD MONITOR UPDATE*\n\n{message}")
+        discord_success = self.send_discord(
+            message=message,
+            title="🆕 MONAD MONITOR UPDATE",
+            color=0x2ecc71,  # Green for update
+        )
+        slack_success = self.send_slack(
+            message=message,
+            title="🆕 MONAD MONITOR UPDATE",
+            color="#2ecc71",
+        )
+        return telegram_success or discord_success or slack_success
+
     def alert_network(self, message: str) -> bool:
         """Send network-wide alert (Telegram + Discord + Slack, rate limited)
 

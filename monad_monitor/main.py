@@ -12,6 +12,7 @@ from .config import (
     load_validators,
     load_huginn_config,
     load_gmonads_config,
+    load_updates_config,
     validate_config,
     validate_validators,
     ConfigValidationError,
@@ -26,6 +27,7 @@ from .logger import init_logger, get_logger, debug, info, warning, error
 from .state_machine import ValidatorStateMachine, ValidatorState
 from .validator import ValidatorHealthChecker, SystemThresholds
 from .api_server import APIServer
+from .version_check import VersionChecker
 
 # Constants
 MAX_METRICS_HISTORY = 100  # Maximum entries per validator to prevent unbounded growth
@@ -208,6 +210,20 @@ def main():
         except OSError as e:
             warning(f"Failed to create state directory {state_dir}: {e}. Using current directory.")
             state_dir = "."
+
+    # New-version update checker (checks GHCR weekly and notifies via non-Pushover channels)
+    version_checker = None
+    updates_config = load_updates_config()
+    if updates_config["enabled"]:
+        version_checker = VersionChecker(
+            image=updates_config["image"],
+            check_interval=updates_config["check_interval"],
+            state_file=os.path.join(state_dir, "last_notified_version.json"),
+            alerts=alerts,
+        )
+        info(f"Version update check enabled (every {updates_config['check_interval']}s)")
+    else:
+        info("Version update check disabled")
 
     # Load persisted state for each validator
     for v in validators:
@@ -543,6 +559,10 @@ def main():
 
             # Check if it's time for extended health report (6-hour detailed report)
             health_reporter.maybe_send_extended_report(validators, states, metrics_data)
+
+            # Check for new monitor releases (weekly, silent if unreachable)
+            if version_checker:
+                version_checker.maybe_notify()
 
             # Memory cleanup: Remove stale entries from metrics_data
             # (validators that were removed from config)

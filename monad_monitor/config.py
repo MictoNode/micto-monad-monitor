@@ -10,6 +10,9 @@ import yaml
 from monad_monitor.huginn import HuginnConfig
 from monad_monitor.gmonads import GmonadsConfig
 
+DEFAULT_UPDATE_IMAGE = "ghcr.io/mictonode/micto-monad-monitor"
+DEFAULT_UPDATE_CHECK_INTERVAL = 7 * 24 * 3600  # Weekly
+
 
 class ConfigValidationError(Exception):
     """Raised when configuration validation fails"""
@@ -260,5 +263,25 @@ def load_gmonads_config() -> GmonadsConfig:
         check_interval=gmonads.get("check_interval", 120),
         timeout=gmonads.get("timeout", 10),
     )
+
+
+def load_updates_config() -> Dict[str, Any]:
+    """
+    Load the new-version update check configuration from the main config file.
+
+    Config format:
+        updates:
+          enabled: true
+          check_interval: 604800   # seconds (default: weekly)
+          image: "ghcr.io/mictonode/micto-monad-monitor"
+    """
+    config = load_config()
+    updates = config.get("updates", {})
+
+    return {
+        "enabled": updates.get("enabled", True),
+        "check_interval": updates.get("check_interval", DEFAULT_UPDATE_CHECK_INTERVAL),
+        "image": updates.get("image", DEFAULT_UPDATE_IMAGE),
+    }
 
 

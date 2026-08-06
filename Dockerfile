@@ -1,5 +1,9 @@
 FROM python:3.11-slim
 
+# Baked in at build time by the release workflow (e.g. v1.4.9)
+ARG MONITOR_VERSION=0.0.0
+ENV MONITOR_VERSION=${MONITOR_VERSION}
+
 WORKDIR /app
 
 # Install dependencies
