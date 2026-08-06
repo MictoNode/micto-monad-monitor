@@ -15,7 +15,7 @@
 
 - **Metrics Dashboard** - 27 Prometheus charts across 7 sections at `http://your-server:8383`
 - **Monitor Dashboard** - Real-time validator status at `http://your-server:8282`
-- **Time range selector** - 1m, 5m, 30m, 1h, All per chart section
+- **Time range selector** - 1m, 5m, 30m, 1h, 24h, 1w, 1mo per chart section
 - **Multi-source validation** - Huginn + gmonads API cross-validation
 - **Active set tracking** - Know when your validator enters/leaves active set
 - **Pushover emergency alerts** - Bypass Do Not Disturb mode
@@ -456,7 +456,7 @@ After login, the dashboard shows **6 stat boxes** and **27 time-series charts** 
 
 ### Features
 
-- **Per-section time range selector** — 1m, 5m, 30m, 1h, All (independent per section)
+- **Per-section time range selector** — 1m, 5m, 30m, 1h, 24h, 1w, 1mo (independent per section)
 - **Tab-based validator selection** — One tab per configured validator
 - **Threshold lines** — Visual markers on block time, disk usage, NVMe temp & wear
 - **Multi-device support** — NVMe chips, disk devices, mountpoints, network interfaces shown separately
@@ -645,7 +645,7 @@ micto-monad-monitor/
 | `GET /api/validators` | List configured validators |
 | `GET /api/overview/{name}` | Stat box data for a validator |
 | `GET /api/metrics/{name}` | Raw metric values for a validator |
-| `GET /api/chart/{name}/{key}?range=1h` | Time-series chart data (ranges: 1m, 5m, 30m, 1h, All) |
+| `GET /api/chart/{name}/{key}?range=1h` | Time-series chart data (ranges: 1m, 5m, 30m, 1h, 24h, 1w, 1mo) |
 
 ---
 
@@ -695,6 +695,8 @@ docker compose logs -f
 |--------|---------|----------|
 | **Pre-built (recommended)** | `docker compose pull && docker compose up -d` | Using GHCR image |
 | **Build from source** | `git pull && docker compose up -d --build` | Uncommented `build: .` in docker-compose.yaml |
+
+> **Note:** When building from source, the new-version notification uses `MONITOR_VERSION`, which defaults to `0.0.0`. Unless you bake your real version in (e.g. `docker compose build --build-arg MONITOR_VERSION=1.4.9`), any published release will be reported as new. Pre-built GHCR images already carry the correct version.
 
 ### Version-Specific Steps
 

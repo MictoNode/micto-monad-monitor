@@ -13,15 +13,15 @@ pushover:
 
 # Discord Webhook (Optional - alternative notification channel)
 # Create webhook in Discord: Server Settings > Integrations > Webhooks
+# Discord is enabled automatically when the webhook URL is set (leave blank to disable)
 discord:
   webhook_url: "${DISCORD_WEBHOOK_URL}"
-  enabled: true  # Set to false to disable Discord notifications
 
 # Slack Webhook (Optional - team notification channel)
 # Create incoming webhook: Apps > Incoming Webhooks > Add to Slack
+# Slack is enabled automatically when the webhook URL is set (leave blank to disable)
 slack:
   webhook_url: "${SLACK_WEBHOOK_URL}"
-  enabled: true  # Set to false to disable Slack notifications
 
 # Monitoring Settings
 monitoring:
