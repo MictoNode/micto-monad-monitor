@@ -356,3 +356,103 @@ class TestTimeRange:
         headers = {"Authorization": f"Bearer {token}"}
         response = client.get("/api/chart/TestVal/nonexistent", headers=headers)
         assert response.status_code == 404  # same behavior, no crash
+
+
+class TestRangeCache:
+    """Test query_range caching: bucketed keys + per-range TTL + no-store header."""
+
+    def test_range_ttl_mapping(self):
+        """Long ranges get longer cache TTL; unknown defaults to 30."""
+        from monad_monitor.api_server import _range_ttl
+        assert _range_ttl("1m") == 10
+        assert _range_ttl("1h") == 30
+        assert _range_ttl("24h") == 60
+        assert _range_ttl("1w") == 300
+        assert _range_ttl("1mo") == 600
+        assert _range_ttl("bogus") == 30
+
+    def test_step_seconds_parsing(self):
+        """Prometheus step strings like '600s' parse to integers."""
+        from monad_monitor.api_server import _step_seconds
+        for step, expected in [("2s", 2), ("5s", 5), ("30s", 30), ("300s", 300), ("600s", 600)]:
+            assert _step_seconds(step) == expected
+
+    def test_query_range_reuses_query_within_bucket(self, monkeypatch):
+        """Consecutive polls in the same step bucket hit the cache (one Prometheus call)."""
+        import asyncio
+        from monad_monitor.api_server import PrometheusClient
+        p = PrometheusClient("http://prom:9090")
+        fake = _FakeClient()
+        p._client = fake
+        base = 1785990000.0
+
+        async def run(offset):
+            monkeypatch.setattr("monad_monitor.api_server.time.time", lambda: base + offset)
+            return await p.query_range("up", range_param="1mo")
+
+        r1 = asyncio.run(run(0))
+        r2 = asyncio.run(run(100))   # same 600s bucket
+        r3 = asyncio.run(run(500))   # same 600s bucket
+        assert fake.calls == 1
+        assert r1 == r2 == r3
+
+    def test_query_range_new_bucket_requeries(self, monkeypatch):
+        """Crossing a step bucket boundary issues a fresh Prometheus call."""
+        import asyncio
+        from monad_monitor.api_server import PrometheusClient
+        p = PrometheusClient("http://prom:9090")
+        fake = _FakeClient()
+        p._client = fake
+        base = 1785990000.0
+
+        async def run(offset):
+            monkeypatch.setattr("monad_monitor.api_server.time.time", lambda: base + offset)
+            return await p.query_range("up", range_param="1mo")
+
+        asyncio.run(run(0))
+        asyncio.run(run(700))   # crosses the 600s bucket boundary
+        assert fake.calls == 2
+
+    def test_api_responses_have_no_store_header(self):
+        """All /api/* responses carry Cache-Control: no-store."""
+        from fastapi.testclient import TestClient
+        from monad_monitor.api_server import create_app
+        app = create_app(password="testpass", jwt_secret="secret", prometheus_url="http://localhost:9090", validators_config=[])
+        client = TestClient(app)
+        login = client.post("/api/auth/login", json={"password": "testpass"})
+        assert login.headers.get("cache-control") == "no-store"
+        token = login.json()["access_token"]
+        r = client.get("/api/validators", headers={"Authorization": f"Bearer {token}"})
+        assert r.headers.get("cache-control") == "no-store"
+        h = client.get("/api/health")
+        assert h.headers.get("cache-control") == "no-store"
+
+
+class _FakeResponse:
+    def __init__(self, data):
+        self._data = data
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._data
+
+
+class _FakeClient:
+    """Minimal async httpx stand-in that counts outgoing calls."""
+    def __init__(self):
+        self.calls = 0
+        self.is_closed = False
+
+    async def get(self, url, params=None):
+        self.calls += 1
+        start = float(params.get("start", 0))
+        step = int(params.get("step", "60s").rstrip("s"))
+        values = [[start + i * step, f"{i + 1}.5"] for i in range(3)]
+        return _FakeResponse({
+            "status": "success",
+            "data": {"resultType": "matrix", "result": [
+                {"metric": {"name": "X"}, "values": values},
+            ]},
+        })

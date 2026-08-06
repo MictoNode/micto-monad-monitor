@@ -179,12 +179,35 @@ def _resolve_range(range_param: str) -> tuple[int, str]:
     return _RANGE_CONFIG.get(range_param, _RANGE_CONFIG["1h"])
 
 
+_RANGE_CACHE_TTL: dict[str, int] = {
+    "1m": 10,
+    "5m": 15,
+    "30m": 30,
+    "1h": 30,
+    "24h": 60,
+    "1w": 300,
+    "1mo": 600,
+}
+
+
+def _range_ttl(range_param: str) -> int:
+    """Cache TTL in seconds for a range param. Long ranges cache longer."""
+    return _RANGE_CACHE_TTL.get(range_param, 30)
+
+
+def _step_seconds(step: str) -> int:
+    """Parse a Prometheus step string like "600s" into integer seconds."""
+    return int(step.rstrip("s")) if step else 1
+
+
 class PrometheusClient:
     """Async client for Prometheus HTTP API with caching."""
 
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip("/")
         self.cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=256, ttl=10)
+        # query_range results: key -> (cached_at_epoch, results). TTL varies per range.
+        self._range_cache: dict[str, tuple[float, list]] = {}
         self._client: httpx.AsyncClient | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
@@ -227,9 +250,14 @@ class PrometheusClient:
         now_ts = time.time()
         start_ts = str(now_ts - start_seconds)
         end_ts = str(now_ts)
-        cache_key = f"r:{promql}:{start_ts}:{step}"
-        if cache_key in self.cache:
-            return self.cache[cache_key]
+        # Bucket the cache key by the step so consecutive polls in the same
+        # window reuse one Prometheus query (heavy 1w/1mo queries dominate load).
+        bucket = int((now_ts - start_seconds) / _step_seconds(step)) * _step_seconds(step)
+        cache_key = f"r:{promql}:{bucket}:{step}"
+        cached = self._range_cache.get(cache_key)
+        ttl = _range_ttl(range_param)
+        if cached and now_ts - cached[0] < ttl:
+            return cached[1]
 
         try:
             resp = await client.get(
@@ -255,7 +283,10 @@ class PrometheusClient:
                 "labels": r.get("metric", {}),
                 "values": values,
             })
-        self.cache[cache_key] = results
+        self._range_cache[cache_key] = (now_ts, results)
+        if len(self._range_cache) > 512:
+            oldest_key = min(self._range_cache, key=lambda k: self._range_cache[k][0])
+            del self._range_cache[oldest_key]
         return results
 
     async def close(self):
@@ -266,6 +297,16 @@ class PrometheusClient:
 def create_app(password: str, jwt_secret: str, prometheus_url: str, validators_config: list[dict]) -> FastAPI:
     app = FastAPI(title="Monad Monitor Dashboard API", docs_url=None, redoc_url=None)
     prom = PrometheusClient(prometheus_url)
+
+    @app.middleware("http")
+    async def _no_store_api_cache(request: Request, call_next):
+        # Dynamic Prometheus-backed data must never be cached by proxies/CDNs,
+        # otherwise stale truncated snapshots get served to the browser.
+        response = await call_next(request)
+        if request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
     def _get_current_user(request: Request) -> dict:
         token = request.cookies.get("jwt")
         if not token:
