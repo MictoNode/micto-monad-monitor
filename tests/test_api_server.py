@@ -413,6 +413,20 @@ class TestRangeCache:
         asyncio.run(run(700))   # crosses the 600s bucket boundary
         assert fake.calls == 2
 
+    def test_query_range_sorts_series_by_freshness(self, monkeypatch):
+        """Stale series (old service_version) sort after the freshest series."""
+        import asyncio
+        from monad_monitor.api_server import PrometheusClient
+        p = PrometheusClient("http://prom:9090")
+        fake = _FakeClientTwoSeries()
+        p._client = fake
+        base = 1785990000.0
+        monkeypatch.setattr("monad_monitor.api_server.time.time", lambda: base)
+        results = asyncio.run(p.query_range("up", range_param="1mo"))
+        # Frontend plots series[0]; it must be the current (freshest) series.
+        assert results[0]["labels"]["service_version"] == "0.15.2"
+        assert results[1]["labels"]["service_version"] == "0.15.0"
+
     def test_api_responses_have_no_store_header(self):
         """All /api/* responses carry Cache-Control: no-store."""
         from fastapi.testclient import TestClient
@@ -454,5 +468,26 @@ class _FakeClient:
             "status": "success",
             "data": {"resultType": "matrix", "result": [
                 {"metric": {"name": "X"}, "values": values},
+            ]},
+        })
+
+
+class _FakeClientTwoSeries:
+    """Fake httpx client returning a stale and a fresh series (service_version split)."""
+    def __init__(self):
+        self.calls = 0
+        self.is_closed = False
+
+    async def get(self, url, params=None):
+        self.calls += 1
+        start = float(params.get("start", 0))
+        step = int(params.get("step", "600s").rstrip("s"))
+        stale = [[start + i * step, "1.5"] for i in range(3)]
+        fresh = [[start + (i + 20) * step, "2.5"] for i in range(3)]
+        return _FakeResponse({
+            "status": "success",
+            "data": {"resultType": "matrix", "result": [
+                {"metric": {"service_version": "0.15.0"}, "values": stale},
+                {"metric": {"service_version": "0.15.2"}, "values": fresh},
             ]},
         })

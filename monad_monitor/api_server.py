@@ -283,6 +283,11 @@ class PrometheusClient:
                 "labels": r.get("metric", {}),
                 "values": values,
             })
+        # A node upgrade (or host change) creates a fresh Prometheus series under
+        # the same `name` label (e.g. service_version 0.15.0 -> 0.15.2) while the
+        # old series goes stale. Frontend single-series charts plot series[0], so
+        # put the freshest series first to always show current data.
+        results.sort(key=lambda r: (r["values"][-1][0] if r["values"] else 0), reverse=True)
         self._range_cache[cache_key] = (now_ts, results)
         if len(self._range_cache) > 512:
             oldest_key = min(self._range_cache, key=lambda k: self._range_cache[k][0])

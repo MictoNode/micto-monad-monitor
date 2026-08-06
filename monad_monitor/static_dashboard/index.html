@@ -977,7 +977,7 @@
         header.addEventListener('click', () => toggleSection(section.id));
 
         const arrow = document.createElement('span');
-        arrow.className = 'section-arrow';
+        arrow.className = 'section-arrow collapsed';
         arrow.id = 'arrow-' + section.id;
         arrow.textContent = '▾';
 
@@ -1024,7 +1024,7 @@
 
         // Body wrapper for grid-template-rows animation
         const wrapper = document.createElement('div');
-        wrapper.className = 'section-body-wrapper';
+        wrapper.className = 'section-body-wrapper collapsed';
         wrapper.id = 'wrapper-' + section.id;
 
         const body = document.createElement('div');
