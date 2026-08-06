@@ -1,6 +1,6 @@
 # Monad Validator Monitor
 
-[![Version](https://img.shields.io/badge/version-1.4.8-8B5CF6?style=flat-square)](https://github.com/MictoNode/micto-monad-monitor)
+[![Version](https://img.shields.io/badge/version-1.4.9-8B5CF6?style=flat-square)](https://github.com/MictoNode/micto-monad-monitor)
 [![Python](https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docker.com)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
@@ -22,6 +22,7 @@
 - **Discord webhook support** - Community alerts
 - **Slack webhook support** - Team alerts
 - **All alert channels optional** - Use any combination of Telegram, Pushover, Discord, Slack
+- **New version notifications** - Monitor checks GHCR weekly and alerts you (Telegram + Discord + Slack, no Pushover) when a new release is available
 
 ---
 
@@ -313,7 +314,15 @@ thresholds:
   memory_critical: 95
   disk_warning: 85
   disk_critical: 95
+
+# New version update check (weekly)
+updates:
+  enabled: true             # Set to false to disable
+  check_interval: 604800    # Check frequency in seconds (default: weekly)
+  image: "ghcr.io/mictonode/micto-monad-monitor"
 ```
+
+The monitor checks the published image tags on GHCR weekly. When a newer release is found, it sends a notification **once** to Telegram, Discord and Slack (Pushover is excluded - reserved for critical alerts) with the update command.
 
 Save: `Ctrl+O`, Exit: `Ctrl+X`
 
