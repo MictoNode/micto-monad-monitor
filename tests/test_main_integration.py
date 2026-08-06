@@ -249,6 +249,27 @@ class TestGracefulShutdown:
 class TestMainIntegrationPattern:
     """Test the integration pattern used in main.py"""
 
+    def test_main_does_not_shadow_os_module_locally(self):
+        """main() must use the module-level os import, not a local one.
+
+        A local 'import os' inside main() makes Python treat 'os' as a
+        function-local name, so earlier os.getenv() calls raise
+        UnboundLocalError at runtime. Regression test for v1.5.0 crash.
+        """
+        import dis
+
+        from monad_monitor import main as main_module
+
+        local_os_binds = [
+            inst
+            for inst in dis.get_instructions(main_module.main)
+            if inst.opname in ("IMPORT_NAME", "STORE_FAST", "STORE_DEREF")
+            and inst.argval == "os"
+        ]
+        assert local_os_binds == [], (
+            f"main() shadows the 'os' module with a local binding: {local_os_binds}"
+        )
+
     def test_integration_components_work_together(self):
         """Test that HealthServer and StateMachine work together correctly"""
         from monad_monitor.health_server import HealthServer

@@ -201,7 +201,6 @@ def main():
     health_checkers: Dict[str, ValidatorHealthChecker] = {}
 
     # Ensure state directory exists (for Docker volume persistence)
-    import os
     state_dir = STATE_DIR
     if not os.path.exists(state_dir):
         try:
