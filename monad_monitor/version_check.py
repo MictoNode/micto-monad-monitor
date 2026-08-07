@@ -117,11 +117,16 @@ class VersionChecker:
         last_notified = self._load_last_notified()
         latest_tuple = normalize_version(latest)
         last_tuple = normalize_version(last_notified)
+        current_tuple = normalize_version(self.current_version)
 
         if latest_tuple is None:
             return
 
-        if last_tuple is None or latest_tuple > last_tuple:
+        # Notify only when a newer release exists than both the last notified
+        # version AND the running version. Otherwise a running build that was
+        # already up-to-date (but had notified an older release earlier, e.g.
+        # 1.5.2 running vs 1.5.0 in state) would get a redundant notification.
+        if last_tuple is None or latest_tuple > max(last_tuple, current_tuple or last_tuple):
             logger.info(
                 f"New monitor version available: {latest} (running {self.current_version})"
             )

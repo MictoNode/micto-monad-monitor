@@ -152,6 +152,26 @@ class TestVersionChecker:
 
         assert alerts.calls == []
 
+    def test_no_notify_when_already_running_latest_but_older_was_notified(self, tmp_path, ghcr):
+        """No notify when the running version already equals latest, even if an
+        older version (1.5.0) was previously notified. Regression for the
+        'available 1.5.2 (running 1.5.2)' duplicate notification."""
+        ghcr(["latest", "1.5.2"])
+        state_file = tmp_path / "last_notified_version.json"
+        state_file.write_text(json.dumps({"version": "1.5.0", "notified_at": 1}))
+        alerts = RecordingAlerts()
+        checker = VersionChecker(
+            image=IMAGE,
+            check_interval=604800,
+            state_file=str(state_file),
+            alerts=alerts,
+            current_version="v1.5.2",
+        )
+
+        checker.maybe_notify()
+
+        assert alerts.calls == []
+
     def test_notifies_only_once_per_version(self, tmp_path, ghcr):
         # First run: 1.5.0 is new -> notify
         ghcr(["latest", "1.4.8", "1.5.0"])
