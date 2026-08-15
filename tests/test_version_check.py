@@ -122,6 +122,14 @@ class TestUpdateMessage:
         msg = build_update_message("1.5.0", "1.4.8")
         assert "git pull && docker compose pull && docker compose up -d" in msg
 
+    def test_message_contains_config_reminder(self):
+        msg = build_update_message("1.5.0", "1.4.8")
+        assert (
+            "Don't forget to check whether config/config.yaml, config/validators.yaml, "
+            ".env and docker-compose.yaml need changes" in msg
+        )
+        assert ".example" in msg
+
 
 class TestVersionChecker:
     def test_notify_when_newer_version(self, tmp_path, ghcr):

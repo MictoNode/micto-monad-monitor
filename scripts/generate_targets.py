@@ -53,8 +53,14 @@ def generate_targets(validators_path: str, output_dir: str) -> None:
     output_path = Path(output_dir) / "validators.json"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(output_path, "w") as f:
+    # Write to a temp file in the same directory first, then atomically move it
+    # into place with os.replace(). Prometheus file_sd watches validators.json;
+    # writing it directly can expose a partially-written file (unexpected end of
+    # JSON input). Same directory => same filesystem => os.replace() is atomic.
+    temp_path = output_path.with_name(output_path.name + ".tmp")
+    with open(temp_path, "w") as f:
         json.dump(targets, f, indent=2)
+    os.replace(temp_path, output_path)
 
     print(f"Generated {len(targets)} targets -> {output_path}")
 

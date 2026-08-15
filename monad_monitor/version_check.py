@@ -59,7 +59,9 @@ def build_update_message(latest: str, current: str) -> str:
     return (
         f"🆕 New monitor version v{_display(latest)} available (running: v{_display(current)})\n\n"
         f"Update:\n"
-        f"cd $HOME/micto-monad-monitor/ && git pull && docker compose pull && docker compose up -d"
+        f"cd $HOME/micto-monad-monitor/ && git pull && docker compose pull && docker compose up -d\n\n"
+        f"📌 Don't forget to check whether config/config.yaml, config/validators.yaml, .env and "
+        f"docker-compose.yaml need changes\n(compare with the .example files after git pull)."
     )
 
 

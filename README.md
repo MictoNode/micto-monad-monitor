@@ -692,6 +692,8 @@ docker compose logs -f
 
 > State files in `/app/state` are preserved across updates via Docker volume. No backup needed.
 
+After updating, compare your local config files (`config/config.yaml`, `config/validators.yaml`, `.env`, `docker-compose.yaml`) with the `.example` files — new releases can add config keys (e.g. `huginn_timeout_alert_threshold`) that you may want to set.
+
 ### Pre-built vs Source
 
 | Method | Command | Use When |
