@@ -90,6 +90,7 @@ You should get a **"Monad Monitor Started"** message on your configured alert ch
 | Alert Type | When | Channels |
 |------------|------|----------|
 | **Node Down** | Can't reach metrics or blocks stopped | Telegram + Pushover + Discord + Slack |
+| **Network Timeout** | Missed rounds seen by network (Huginn), increase ≥ `huginn_timeout_alert_threshold` | Telegram + Pushover + Discord + Slack |
 | **High Resources (Critical)** | CPU/RAM/Disk ≥ 95% | Telegram + Pushover + Discord + Slack |
 | **High Resources (Warning)** | CPU/RAM/Disk ≥ 90% | Telegram + Discord + Slack |
 | **Active Set Changes** | Enters or leaves active set | Telegram + Discord + Slack |
@@ -581,6 +582,7 @@ docker compose exec monitor env | grep DASHBOARD
 # In config.yaml:
 monitoring:
   alert_threshold: 5  # More failures before alerting
+  huginn_timeout_alert_threshold: 3  # Only alert when 3+ missed rounds accumulate per check window (network timeouts)
 ```
 
 ### State not persisting (false alerts on restart)
@@ -708,7 +710,7 @@ This update adds the **Metrics Dashboard** (:8383) with Prometheus charts. It's 
 **New features:**
 - Metrics Dashboard with 27 Prometheus charts
 - Prometheus container (auto-starts with `docker compose up`)
-- Time range selector per chart section (1m, 5m, 30m, 1h, All)
+- Time range selector per chart section (1m, 5m, 30m, 1h, 24h, 1w, 1mo)
 - Per-method RPC latency charts
 - NVMe temperature and wear level monitoring
 - Purple dark theme across both dashboards
