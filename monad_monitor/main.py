@@ -40,6 +40,21 @@ running = True
 health_server: Optional[HealthServer] = None
 dashboard_server: Optional[DashboardServer] = None
 
+def timeout_increase_to_report(
+    last_timeout_count: Optional[int], current_timeout_count: int, threshold: int
+) -> int:
+    """Return the Huginn timeout increase if it meets the alert threshold, else 0.
+
+    A None baseline (first check after start) never reports. A flat or
+    decreasing count never reports. The alert fires only when the increase
+    between checks is >= threshold (threshold 1 = alert on any missed round).
+    """
+    if last_timeout_count is None or current_timeout_count <= last_timeout_count:
+        return 0
+    increase = current_timeout_count - last_timeout_count
+    return increase if increase >= threshold else 0
+
+
 def signal_handler(sig, frame):
     """Handle shutdown signals gracefully"""
     global running
@@ -255,6 +270,9 @@ def main():
     # Metrics data for extended reports
     metrics_data: Dict[str, Dict] = {}
 
+    # Huginn network-visible timeout alert threshold (min missed rounds per check window)
+    huginn_timeout_alert_threshold = config["monitoring"].get("huginn_timeout_alert_threshold", 1)
+
     # Send startup notification
     health_reporter.send_startup_report(validators)
     info(f"Monitor started - {len(validators)} validators | Log level: {log_level}")
@@ -358,19 +376,28 @@ def main():
                         huginn_timeout_count = health_status.huginn_data.get("timeout_count", 0)
                         last_huginn_timeout = state.get("last_huginn_timeout_count")
 
-                        if last_huginn_timeout is not None and huginn_timeout_count > last_huginn_timeout:
-                            timeout_increase = huginn_timeout_count - last_huginn_timeout
-                            if timeout_increase > 0:
-                                error(f"❌ {validator.name}: Network timeout detected (Huginn): +{timeout_increase} (total: {huginn_timeout_count})")
-                                alert_success = alerts.alert_critical(
-                                    f"*{validator.name}*\n\n"
-                                    f"⚠️ Network Timeout Detected\n\n"
-                                    f"Validator missed {timeout_increase} round(s) as seen by network.\n"
-                                    f"Total timeouts: {huginn_timeout_count}",
-                                    validator_name=validator.name,
-                                )
-                                if not alert_success:
-                                    error(f"Failed to send Huginn timeout alert for {validator.name}")
+                        # Alert only when the increase meets the configured threshold
+                        # (huginn_timeout_alert_threshold, default 1 = alert on any missed round)
+                        timeout_increase = timeout_increase_to_report(
+                            last_huginn_timeout, huginn_timeout_count, huginn_timeout_alert_threshold
+                        )
+                        if timeout_increase > 0:
+                            error(f"❌ {validator.name}: Network timeout detected (Huginn): +{timeout_increase} (total: {huginn_timeout_count})")
+                            alert_success = alerts.alert_critical(
+                                f"*{validator.name}*\n\n"
+                                f"⚠️ Network Timeout Detected\n\n"
+                                f"Validator missed {timeout_increase} round(s) as seen by network.\n"
+                                f"Total timeouts: {huginn_timeout_count}",
+                                validator_name=validator.name,
+                            )
+                            if not alert_success:
+                                error(f"Failed to send Huginn timeout alert for {validator.name}")
+                        elif last_huginn_timeout is not None and huginn_timeout_count > last_huginn_timeout:
+                            info(
+                                f"⏱️ {validator.name}: Huginn timeout +{huginn_timeout_count - last_huginn_timeout} "
+                                f"(total: {huginn_timeout_count}) below alert threshold "
+                                f"{huginn_timeout_alert_threshold} - no alert"
+                            )
 
                         state["last_huginn_timeout_count"] = huginn_timeout_count
                     else:

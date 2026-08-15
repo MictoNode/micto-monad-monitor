@@ -298,6 +298,49 @@ class TestValidateConfig:
         # Should not raise
         validate_config(config)
 
+    def test_validate_config_timeout_threshold_valid(self):
+        """Test validation accepts a valid huginn_timeout_alert_threshold"""
+        config = {
+            "telegram": {"token": "test", "chat_id": "test"},
+            "monitoring": {"check_interval": 60, "huginn_timeout_alert_threshold": 3},
+            "thresholds": {},
+        }
+        # Should not raise
+        validate_config(config)
+
+    def test_validate_config_timeout_threshold_zero_rejected(self):
+        """Test validation rejects huginn_timeout_alert_threshold = 0"""
+        config = {
+            "telegram": {"token": "test", "chat_id": "test"},
+            "monitoring": {"check_interval": 60, "huginn_timeout_alert_threshold": 0},
+            "thresholds": {},
+        }
+        with pytest.raises(ConfigValidationError) as exc_info:
+            validate_config(config)
+        assert "huginn_timeout_alert_threshold" in str(exc_info.value)
+
+    def test_validate_config_timeout_threshold_negative_rejected(self):
+        """Test validation rejects huginn_timeout_alert_threshold = -1"""
+        config = {
+            "telegram": {"token": "test", "chat_id": "test"},
+            "monitoring": {"check_interval": 60, "huginn_timeout_alert_threshold": -1},
+            "thresholds": {},
+        }
+        with pytest.raises(ConfigValidationError) as exc_info:
+            validate_config(config)
+        assert "huginn_timeout_alert_threshold" in str(exc_info.value)
+
+    def test_validate_config_timeout_threshold_string_rejected(self):
+        """Test validation rejects non-integer huginn_timeout_alert_threshold"""
+        config = {
+            "telegram": {"token": "test", "chat_id": "test"},
+            "monitoring": {"check_interval": 60, "huginn_timeout_alert_threshold": "3"},
+            "thresholds": {},
+        }
+        with pytest.raises(ConfigValidationError) as exc_info:
+            validate_config(config)
+        assert "huginn_timeout_alert_threshold" in str(exc_info.value)
+
 
 class TestValidateValidators:
     """Test cases for validate_validators function"""

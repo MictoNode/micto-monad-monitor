@@ -117,6 +117,17 @@ def validate_config(config: Dict[str, Any]) -> None:
     if check_interval > 3600:
         errors.append(f"check_interval ({check_interval}s) is too high - maximum is 3600 seconds")
 
+    # Huginn network-visible timeout alert threshold (min missed rounds per check window)
+    timeout_alert_threshold = monitoring.get("huginn_timeout_alert_threshold", 1)
+    if (
+        not isinstance(timeout_alert_threshold, int)
+        or isinstance(timeout_alert_threshold, bool)
+        or timeout_alert_threshold < 1
+    ):
+        errors.append(
+            f"huginn_timeout_alert_threshold ({timeout_alert_threshold}) must be an integer >= 1"
+        )
+
     # Check thresholds
     thresholds = config.get("thresholds", {})
     cpu_warning = thresholds.get("cpu_warning", 90)

@@ -457,3 +457,50 @@ class TestStateMachineInitializationOnFailure:
         # State should now be ACTIVE, but NO transition alert
         assert machine.current_state == ValidatorState.ACTIVE
         assert transition is None  # No alert should be sent
+
+
+class TestHuginnTimeoutAlertThreshold:
+    """Tests for the Huginn network-visible timeout alert threshold decision"""
+
+    def test_no_alert_without_baseline(self):
+        """First check records baseline only - no alert"""
+        from monad_monitor.main import timeout_increase_to_report
+
+        assert timeout_increase_to_report(None, 1, 1) == 0
+
+    def test_no_alert_on_flat_count(self):
+        """No increase means no alert"""
+        from monad_monitor.main import timeout_increase_to_report
+
+        assert timeout_increase_to_report(3, 3, 1) == 0
+
+    def test_no_alert_on_decrease(self):
+        """Count reset/decrease (e.g. Huginn window rollover) never alerts"""
+        from monad_monitor.main import timeout_increase_to_report
+
+        assert timeout_increase_to_report(5, 2, 1) == 0
+
+    def test_threshold_one_alerts_on_any_increase(self):
+        """Default threshold 1 preserves legacy behavior: any increase alerts"""
+        from monad_monitor.main import timeout_increase_to_report
+
+        assert timeout_increase_to_report(0, 1, 1) == 1
+
+    def test_increase_below_threshold_suppressed(self):
+        """Increase of 1-2 with threshold 3 produces no alert"""
+        from monad_monitor.main import timeout_increase_to_report
+
+        assert timeout_increase_to_report(5, 6, 3) == 0
+        assert timeout_increase_to_report(5, 7, 3) == 0
+
+    def test_increase_at_threshold_reported(self):
+        """Increase exactly at threshold is reported"""
+        from monad_monitor.main import timeout_increase_to_report
+
+        assert timeout_increase_to_report(5, 8, 3) == 3
+
+    def test_increase_above_threshold_reported(self):
+        """Larger burst reports the full increase"""
+        from monad_monitor.main import timeout_increase_to_report
+
+        assert timeout_increase_to_report(5, 10, 3) == 5
