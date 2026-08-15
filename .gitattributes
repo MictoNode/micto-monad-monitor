@@ -1,2 +1,2 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Line endings: normalize all text to LF regardless of platform.
+* text=auto eol=lf
