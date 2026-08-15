@@ -306,7 +306,7 @@ Default settings work for most users. Key options:
 monitoring:
   check_interval: 60           # Seconds between checks
   alert_threshold: 3           # Failures before alerting
-  huginn_timeout_alert_threshold: 1  # Min missed rounds seen by network before CRITICAL (1 = any)
+  huginn_timeout_alert_threshold: 3  # Min missed rounds seen by network before CRITICAL (per check window)
   extended_report_interval: 21600  # 6-hour detailed report
 
 thresholds:
