@@ -43,7 +43,8 @@ thresholds:
 
 # Huginn Tech API (External Validator Status Verification)
 # Provides reliable active set detection via external API
-# Rate limit: 5 validators per hour (cache recommended)
+# API v2: validator/uptime endpoints have no documented per-validator rate
+# limit (staking endpoints are 60 req/min/IP); cache keeps verdicts stable
 huginn:
   enabled: true
   endpoints:

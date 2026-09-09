@@ -29,6 +29,32 @@ RETRY_MAX_DELAY = 5.0  # seconds
 CIRCUIT_BREAKER_FAILURE_THRESHOLD = 5
 CIRCUIT_BREAKER_RECOVERY_TIME = 60  # seconds
 
+# Huginn Validator & Staking API v2 (OpenAPI 2.1.0)
+# Canonical per-validator path is PLURAL /validators/uptime/{idOrAddress}.
+# The legacy singular path (/validator/uptime/...) still responds but is
+# undocumented and may disappear; do not rely on it.
+# Without query params the API returns a rolling 24h raw-event window; pass
+# period=all to get cumulative totals from the permanent epoch snapshots
+# (the semantics this monitor's counters were designed around).
+VALIDATOR_UPTIME_PATH = "/validators/uptime/"
+UPTIME_PERIOD_QUERY = "?period=all"
+VALIDATOR_PATH = "/validators/"
+VALIDATOR_HEALTH_SUFFIX = "/health"
+STATUS_PATH = "/status"
+
+# Validator API "status" field values (v2)
+STATUS_ACTIVE = "active"
+STATUS_INACTIVE = "inactive"
+STATUS_PENDING = "pending"
+
+# Data-freshness gating (/status). Huginn serves uptime verdicts from SQLite
+# even when its consensus node is unreachable, so a stale "inactive" verdict
+# must not be trusted (fall back to gmonads instead). Raw round events arrive
+# every block (~0.3s), so silence longer than the threshold means the source
+# has lost its node.
+MAX_HUGINN_DATA_AGE_SECONDS = 300  # raw events silent this long -> data stale
+FRESHNESS_CHECK_INTERVAL = 60      # per-network /status poll interval (seconds)
+
 
 class CircuitState(Enum):
     """Circuit breaker durumları"""
@@ -43,7 +69,7 @@ class HuginnConfig:
 
     endpoints: Dict[str, str] = field(default_factory=lambda: DEFAULT_ENDPOINTS.copy())
     enabled: bool = True
-    check_interval: int = 3600  # 1 hour cache (rate limit: 5 validators/hour)
+    check_interval: int = 3600  # 1 hour cache (validator endpoints are not rate limited per docs; cache keeps verdicts stable and reduces load)
     timeout: int = 10
     # Legacy support: base_url overrides endpoints if provided
     base_url: Optional[str] = None
@@ -85,6 +111,11 @@ class ValidatorUptime:
     last_block_height: Optional[int]
     since_utc: Optional[str]
     fetched_at: float  # Unix timestamp
+    # v2 /health merge (best-effort; None when health endpoint unavailable)
+    uptime_24h: Optional[float] = None  # rolling 24h uptime %
+    health_state: Optional[str] = None  # "healthy"/"stale"/"no_data"/... from Huginn /health
+    seconds_since_last_event: Optional[int] = None  # network-side liveness (seconds)
+    last_event_utc: Optional[str] = None  # newest observed round event (UTC)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""
@@ -102,6 +133,10 @@ class ValidatorUptime:
             "last_block_height": self.last_block_height,
             "since_utc": self.since_utc,
             "fetched_at": self.fetched_at,
+            "uptime_24h": self.uptime_24h,
+            "health_state": self.health_state,
+            "seconds_since_last_event": self.seconds_since_last_event,
+            "last_event_utc": self.last_event_utc,
         }
 
 
@@ -189,6 +224,8 @@ class HuginnClient:
         # Cache key format: "network:secp_address" for per-network caching
         self._cache: Dict[str, ValidatorUptime] = {}
         self._cache_times: Dict[str, float] = {}
+        # /status freshness cache: key "network" -> {"seconds_since_newest": int|None, "checked_at": float}
+        self._status_cache: Dict[str, Dict[str, Any]] = {}
         # Circuit breaker for each network
         self._circuit_breakers: Dict[str, CircuitBreaker] = {}
         # Logger
@@ -273,14 +310,23 @@ class HuginnClient:
         gmonads_client: Optional[Any] = None
     ) -> Optional[ValidatorUptime]:
         """
-        Get validator uptime data from Huginn API.
+        Get validator uptime data from Huginn API (API v2).
 
-        Uses caching to respect rate limits (5 validators/hour).
-        Cache is per (network, secp_address) tuple.
+        Calls the canonical /validators/uptime/{secp} endpoint with
+        period=all so counters are CUMULATIVE epoch-snapshot totals, not the
+        rolling 24h raw-event window the API returns by default. Cumulative
+        totals are what keep is_ever_active and the timeout-count increase
+        baseline meaningful (see main.timeout_increase_to_report).
 
-        Active set status is determined from Huginn API's "status" field.
-        If the status field is missing, is_active is set to None, which
-        triggers gmonads fallback in metrics.py.
+        Cache is per (network, secp_address) tuple. Verdicts are additionally
+        gated on /status freshness: if Huginn's raw round events have been
+        silent too long (its node is unreachable, SQLite keeps serving stale
+        data), an inactive/pending verdict is downgraded to None so metrics.py
+        falls back to gmonads instead of raising a false "LEFT ACTIVE SET".
+
+        Best-effort /validators/{secp}/health merge restores last_round /
+        last_block_height (removed from the v2 uptime payload) and adds
+        uptime_24h / health_state / seconds_since_last_event.
 
         Args:
             secp_address: The validator's secp256k1 public key
@@ -305,32 +351,12 @@ class HuginnClient:
         # Get endpoint for the specified network
         base_url = self.config.get_endpoint(network)
 
-        # Fetch from API with retry and circuit breaker
-        url = f"{base_url}/validator/uptime/{secp_address}"
-        response = self._fetch_with_retry(url, network, self.config.timeout)
+        # Fetch cumulative uptime totals from the canonical v2 endpoint
+        url = f"{base_url}{VALIDATOR_UPTIME_PATH}{secp_address}{UPTIME_PERIOD_QUERY}"
+        response_data = self._get_json(url, network, secp_address)
 
-        if response is None:
-            # Return cached data if available, even if stale
-            return self._cache.get(cache_key)
-
-        # Handle rate limiting
-        if response.status_code == 429:
-            self._logger.warning(
-                f"Huginn API rate limited for {secp_address[:16]}... on {network}"
-            )
-            return self._cache.get(cache_key)
-
-        if response.status_code >= 400:
-            self._logger.warning(
-                f"Huginn API error (HTTP {response.status_code}) for "
-                f"{secp_address[:16]}... on {network}"
-            )
-            return self._cache.get(cache_key)
-
-        try:
-            response_data = response.json()
-        except ValueError as e:
-            self._logger.error(f"Huginn API parse error on {network}: {e}")
+        if response_data is None:
+            # Error, rate limited, or not found - return cached data if any
             return self._cache.get(cache_key)
 
         # Extract uptime data from response (API returns {"success": true, "uptime": {...}})
@@ -339,12 +365,168 @@ class HuginnClient:
         # Parse response — active set detection from API status field only
         uptime = self._parse_uptime_response(secp_address, data)
 
+        if uptime:
+            # Merge /health liveness fields (best-effort, never fails the fetch)
+            self._enrich_with_health(uptime, base_url, network)
+            # Downgrade inactive/pending verdicts when Huginn data is stale
+            self._apply_freshness_gate(uptime, network)
+
         # Cache the result
         if uptime:
             self._cache[cache_key] = uptime
             self._cache_times[cache_key] = now
 
         return uptime
+
+    def _get_json(
+        self, url: str, network: str, subject: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Fetch a URL and decode JSON, honoring retry/circuit breaker/rate limit.
+
+        Returns None on any failure (server error, rate limit, HTTP >= 400,
+        network error, invalid JSON). Callers fall back to their cache.
+        """
+        response = self._fetch_with_retry(url, network, self.config.timeout)
+
+        if response is None:
+            return None
+
+        # Handle rate limiting
+        if response.status_code == 429:
+            who = f" for {subject[:16]}..." if subject else ""
+            self._logger.warning(f"Huginn API rate limited{who} on {network}")
+            return None
+
+        if response.status_code >= 400:
+            who = f" for {subject[:16]}..." if subject else ""
+            self._logger.warning(
+                f"Huginn API error (HTTP {response.status_code}){who} on {network}"
+            )
+            return None
+
+        try:
+            return response.json()
+        except ValueError as e:
+            self._logger.error(f"Huginn API parse error on {network}: {e}")
+            return None
+
+    def _get_json_aux(
+        self, url: str, network: str, subject: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Single-shot JSON fetch for AUXILIARY endpoints (/health, /status).
+
+        These are best-effort enrichment/freshness reads polled on every cache
+        refresh; they must not retry (would stall the monitor loop during a
+        Huginn outage) and must not touch the shared circuit breaker (their
+        failures would open it and block the PRIMARY uptime fetch too).
+        Any failure is logged at debug and returns None (fail-open).
+        """
+        try:
+            response = requests.get(url, timeout=self.config.timeout)
+        except RequestException as e:
+            who = f" for {subject[:16]}..." if subject else ""
+            self._logger.debug(f"Huginn aux request failed{who} on {network}: {e}")
+            return None
+
+        if response.status_code >= 400:
+            who = f" for {subject[:16]}..." if subject else ""
+            self._logger.debug(
+                f"Huginn aux endpoint HTTP {response.status_code}{who} on {network}"
+            )
+            return None
+
+        try:
+            return response.json()
+        except ValueError as e:
+            self._logger.debug(f"Huginn aux parse error on {network}: {e}")
+            return None
+
+    def _enrich_with_health(
+        self, uptime: ValidatorUptime, base_url: str, network: str
+    ) -> None:
+        """
+        Best-effort merge of /validators/{secp}/health into ValidatorUptime.
+
+        The v2 uptime payload no longer carries last_round/last_block_height;
+        /health does, plus a purpose-built liveness view (uptime_24h,
+        health_state, seconds_since_last_event). Any health failure only logs
+        at debug level - the uptime result stands.
+        """
+        url = f"{base_url}{VALIDATOR_PATH}{uptime.secp_address}{VALIDATOR_HEALTH_SUFFIX}"
+        health_data = self._get_json_aux(url, network, uptime.secp_address)
+        if health_data is None:
+            return
+        health = health_data.get("health") if isinstance(health_data, dict) else None
+        if not isinstance(health, dict):
+            return
+
+        uptime.last_round = health.get("last_round", uptime.last_round)
+        uptime.last_block_height = health.get("last_block_height", uptime.last_block_height)
+        uptime.uptime_24h = health.get("uptime_24h")
+        uptime.health_state = health.get("state")
+        uptime.seconds_since_last_event = health.get("seconds_since_last_event")
+        uptime.last_event_utc = health.get("last_event_utc")
+
+    def _is_huginn_data_stale(self, network: str) -> bool:
+        """
+        Whether Huginn's raw round events have been silent too long (per /status).
+
+        Huginn serves uptime data from SQLite even when its consensus node is
+        unreachable; raw round events arrive every block, so silence past
+        MAX_HUGINN_DATA_AGE_SECONDS means every verdict served is stale.
+
+        /status itself is polled at most once per FRESHNESS_CHECK_INTERVAL per
+        network. Fail-open: if /status is unavailable, data is treated as fresh.
+        """
+        cache_key = f"freshness:{network.lower()}"
+        now = time.time()
+        cached = self._status_cache.get(cache_key)
+        if cached and now - cached.get("checked_at", 0) < FRESHNESS_CHECK_INTERVAL:
+            seconds_since_newest = cached.get("seconds_since_newest")
+        else:
+            base_url = self.config.get_endpoint(network)
+            status_data = self._get_json_aux(f"{base_url}{STATUS_PATH}", network)
+            seconds_since_newest = None
+            if isinstance(status_data, dict):
+                uptime_events = status_data.get("uptime_events") or {}
+                seconds_since_newest = uptime_events.get("seconds_since_newest")
+            self._status_cache[cache_key] = {
+                "checked_at": now,
+                "seconds_since_newest": seconds_since_newest,
+            }
+
+        if seconds_since_newest is None:
+            return False  # fail-open: unknown freshness
+
+        if seconds_since_newest > MAX_HUGINN_DATA_AGE_SECONDS:
+            self._logger.warning(
+                f"Huginn data is STALE for {network} "
+                f"({seconds_since_newest}s since last raw round event)"
+            )
+            return True
+        return False
+
+    def _apply_freshness_gate(self, uptime: ValidatorUptime, network: str) -> None:
+        """
+        Downgrade inactive/pending verdicts to None (unknown) while Huginn's
+        data is stale, so callers fall back to gmonads instead of trusting a
+        frozen "inactive" and raising a false "LEFT ACTIVE SET" alert.
+
+        Active verdicts are left untouched: downgrading them could mask a real
+        exit; the next fresh fetch corrects any lag.
+        """
+        if uptime.is_active is not False:
+            return
+        if not self._is_huginn_data_stale(network):
+            return
+        self._logger.warning(
+            f"Huginn verdict for {uptime.secp_address[:16]}... on {network} is "
+            f"inactive/pending but data is stale - downgrading to unknown "
+            f"(gmonads fallback)"
+        )
+        uptime.is_active = None
 
     def _parse_uptime_response(
         self, secp_address: str, data: Dict[str, Any]
@@ -379,12 +561,24 @@ class HuginnClient:
         else:
             uptime_percent = 0.0
 
-        # Determine active set status from API's "status" field only
+        # Determine active set status from API's "status" field (v2 values:
+        # "active" | "inactive" | "pending"). Only "active" means in-set;
+        # inactive and pending both report False. Any present-but-unexpected
+        # value (e.g. a future "unknown") is treated as unknown -> gmonads
+        # fallback rather than a confident False.
         api_status = data.get("status")
-        if api_status is not None:
-            is_active = api_status == "active"
+        if api_status == STATUS_ACTIVE:
+            is_active = True
+        elif api_status in (STATUS_INACTIVE, STATUS_PENDING):
+            is_active = False
+        elif api_status is not None:
+            is_active = None  # Unknown value -> metrics.py gmonads fallback
+            self._logger.warning(
+                f"Huginn unexpected status {api_status!r} for "
+                f"{secp_address[:16]}..., falling back to gmonads"
+            )
         else:
-            is_active = None  # Unknown → metrics.py gmonads fallback
+            is_active = None  # Missing field -> metrics.py gmonads fallback
             self._logger.debug(
                 f"Huginn status field missing for {secp_address[:16]}..., "
                 f"falling back to gmonads"

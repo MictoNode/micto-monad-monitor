@@ -656,7 +656,7 @@ micto-monad-monitor/
 
 | API | Purpose | Rate Limit |
 |-----|---------|------------|
-| [Huginn Tech](https://huginn.tech) | Validator uptime, active set | 5 validators/hour |
+| [Huginn Tech](https://huginn.tech) | Validator uptime, active set (cumulative) | API v2: no per-validator limit documented; client caches 10 min |
 | [gmonads.com](https://gmonads.com) | Network TPS, block fullness, fallback | 30 req/min |
 
 ---

@@ -1,5 +1,12 @@
 FROM python:3.11-slim
 
+# tzdata: Debian slim has no IANA timezone database; without it glibc cannot
+# resolve the container TZ env (e.g. Europe/Istanbul) and silently falls back
+# to UTC, so logs and timestamps ignore the operator's .env TZ setting.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
 # Baked in at build time by the release workflow (e.g. v1.4.9)
 ARG MONITOR_VERSION=0.0.0
 ENV MONITOR_VERSION=${MONITOR_VERSION}
