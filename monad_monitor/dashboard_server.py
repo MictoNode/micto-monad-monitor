@@ -52,7 +52,7 @@ class DashboardServer:
         self._static_dir = Path(__file__).parent / "static"
 
     async def _get_index(self, request: web.Request) -> web.Response:
-        """Serve index.html"""
+        """Serve index.html with version-stamped asset URLs"""
         index_path = self._static_dir / "index.html"
         if not index_path.exists():
             return web.Response(
@@ -63,6 +63,15 @@ class DashboardServer:
 
         with open(index_path, "r", encoding="utf-8") as f:
             content = f.read()
+
+        # style.css / app.js are served immutable (max-age=1y), so their URLs
+        # must change whenever the release changes - otherwise a browser or an
+        # edge proxy keeps the old assets for a year and the dashboard silently
+        # renders the previous design. The HTML itself is revalidated on every
+        # load, so stamping the running version here is enough.
+        version = detect_version()
+        content = content.replace('href="style.css"', f'href="style.css?v={version}"')
+        content = content.replace('src="app.js"', f'src="app.js?v={version}"')
 
         return web.Response(
             text=content,
