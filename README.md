@@ -1,6 +1,6 @@
 # Monad Validator Monitor
 
-[![Version](https://img.shields.io/badge/version-1.7.1-8B5CF6?style=flat-square)](https://github.com/MictoNode/micto-monad-monitor)
+[![Version](https://img.shields.io/badge/version-1.7.2-8B5CF6?style=flat-square)](https://github.com/MictoNode/micto-monad-monitor)
 [![Python](https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docker.com)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
@@ -435,7 +435,7 @@ Production-grade metrics dashboard with Prometheus time-series charts at `http:/
 
 ### Overview
 
-After login, the dashboard shows **9 stat boxes** and **31 time-series charts** across **7 collapsible sections**:
+After login, the dashboard shows **9 stat boxes** and **26 time-series charts** across **6 collapsible sections**:
 
 | Stat Box | Description |
 |----------|-------------|
@@ -457,7 +457,6 @@ After login, the dashboard shows **9 stat boxes** and **31 time-series charts** 
 | **Peer & Network** | 3 | Connected peers, network I/O per interface |
 | **Raptorcast** | 4 | Decoding rate, cache hit ratio, queue depth, insertions |
 | **Txpool** | 3 | Pending/queued transactions, gas pricing |
-| **RPC** | 5 | Active requests, execution duration, call rate per method, wait time, per-method latency |
 | **Host** | 8 | CPU, memory, load, disk I/O, filesystem usage, NVMe temperature & wear level |
 | **TrieDB** | 1 | Fast/slow/free tier distribution |
 
@@ -724,7 +723,7 @@ validators:
     metrics_port: 9143      # node-published metrics (Monad >= 0.16.2)
 ```
 
-**Coverage caveat (verified against a live v0.16.2 testnet node):** `:9143` serves every metric family the monitor charts **except `monad_rpc_*`** — the RPC section is served by the separate `monad-rpc` service, which the OTEL collector used to aggregate. Until RPC coverage on the new endpoint is confirmed, keep scraping `:8889` for the RPC charts (or check whether `monad-rpc` exposes its own metrics port). Otherwise those 5 charts report "no data".
+**Coverage (verified against a live v0.16.2 testnet node):** `:9143` serves **every metric family the monitor charts**. The one exception used to be the RPC metrics section — those came from the separate `monad-rpc` service, which the OTEL collector aggregated — and that section has been **removed** (see v1.7.2 below), so the switch costs no chart. The 8889-only leftovers (`monad_rpc_request_duration_seconds_*`, two `monad_bft_raptorcast_secondary_publisher_*` families) were never queried by the monitor.
 
 **Firewall:** keep `:8889` and `:9143` reachable **only from your monitor server** — metrics have no reason to be public. When MF switches to pull, add MF's scraper IPs as well.
 
@@ -803,6 +802,18 @@ docker compose ps
 - Monitor Dashboard (:8282) and Health Server (:8181) unchanged
 
 **No action needed if you don't want the Metrics Dashboard** — it stays disabled when `DASHBOARD_PASSWORD` is empty.
+
+#### v1.7.2 — RPC metrics section removed
+
+The metrics dashboard no longer carries an **RPC** section (the 5 charts: active requests, execution duration, call rate per method, wait time, per-method latency).
+
+**Why:** those charts were the only thing the monitor still read from `monad-rpc` through the OTEL collector on `:8889`, and Monad Foundation is retiring that collector. Everything else the dashboard charts already comes from the node itself on `:9143`, so dropping the section makes the metrics-port switch lossless.
+
+**Unchanged:**
+- The RPC **health check** (`rpc_port: 8080` → `RPC: Healthy / Down` in the card details)
+- Network **TPS** (gmonads) and **tx throughput** (`monad_execution_ledger_num_tx_commits` in the Commit Rate chart)
+
+**No config change required.** Keep `metrics_port: 8889` until MF announces the cut-over; after that, `9143` works with no chart loss.
 
 ---
 

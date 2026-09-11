@@ -214,39 +214,6 @@ class TestQueries:
         formatted = query.format(name="TestVal")
         assert "TestVal" in formatted
 
-    def test_rpc_active_query_uses_sum_aggregate(self):
-        """rpc_active uses sum() aggregate — metric tracks outgoing connections,
-        not incoming RPC calls. 16 series all zero, aggregate gives single value."""
-        from monad_monitor.api_server import PROMETHEUS_QUERIES
-        assert "rpc_active" in PROMETHEUS_QUERIES
-        query = PROMETHEUS_QUERIES["rpc_active"]
-        assert "sum(" in query, "rpc_active must use sum() aggregate"
-        assert "monad_rpc_active_requests" in query
-        formatted = query.format(name="TestVal")
-        assert "{name}" not in formatted
-        assert "TestVal" in formatted
-
-    def test_rpc_exec_duration_queries_use_execution_metric(self):
-        """rpc_exec_p50/p95/p99 use execution_duration histogram (per-method labels)."""
-        from monad_monitor.api_server import PROMETHEUS_QUERIES
-        for key in ("rpc_exec_p50", "rpc_exec_p95", "rpc_exec_p99"):
-            assert key in PROMETHEUS_QUERIES, f"{key} missing from PROMETHEUS_QUERIES"
-            query = PROMETHEUS_QUERIES[key]
-            assert "monad_rpc_execution_duration_seconds" in query, \
-                f"{key} must use execution_duration metric"
-            assert "histogram_quantile" in query, f"{key} must use histogram_quantile"
-            assert 'type="total"' in query, f"{key} must filter type=total"
-            formatted = query.format(name="TestVal")
-            assert "{name}" not in formatted
-            assert "TestVal" in formatted
-
-    def test_old_rpc_duration_keys_removed(self):
-        """Old rpc_duration_p50/p95/p99 keys must not exist (replaced by rpc_exec_*)."""
-        from monad_monitor.api_server import PROMETHEUS_QUERIES
-        for old_key in ("rpc_duration_p50", "rpc_duration_p95", "rpc_duration_p99"):
-            assert old_key not in PROMETHEUS_QUERIES, \
-                f"Old key '{old_key}' should be replaced by rpc_exec_*"
-
     def test_raptor_insertions_replaces_overquota(self):
         """raptor_overquota replaced by raptor_insertions (overquota metric absent from node)."""
         from monad_monitor.api_server import PROMETHEUS_QUERIES
@@ -254,54 +221,6 @@ class TestQueries:
         assert "raptor_overquota" not in PROMETHEUS_QUERIES
         query = PROMETHEUS_QUERIES["raptor_insertions"]
         assert "p2p_total_insertions" in query
-        formatted = query.format(name="TestVal")
-        assert "{name}" not in formatted
-        assert "TestVal" in formatted
-
-    def test_overview_rpc_requests_uses_sum(self):
-        """OVERVIEW_QUERIES rpc_requests must use sum() aggregate (same as rpc_active)."""
-        from monad_monitor.api_server import OVERVIEW_QUERIES
-        assert "rpc_requests" in OVERVIEW_QUERIES
-        query = OVERVIEW_QUERIES["rpc_requests"]
-        assert "sum(" in query, "rpc_requests must use sum() aggregate"
-        formatted = query.format(name="TestVal")
-        assert "{name}" not in formatted
-
-    def test_rpc_call_rate_query_exists(self):
-        """rpc_call_rate uses execution_duration_count with per-method breakdown."""
-        from monad_monitor.api_server import PROMETHEUS_QUERIES
-        assert "rpc_call_rate" in PROMETHEUS_QUERIES
-        query = PROMETHEUS_QUERIES["rpc_call_rate"]
-        assert "execution_duration_seconds_count" in query
-        assert "sum by(main)" in query
-        assert 'type="total"' in query
-        formatted = query.format(name="TestVal")
-        assert "{name}" not in formatted
-        assert "TestVal" in formatted
-
-    def test_rpc_wait_time_queries_exist(self):
-        """rpc_wait_p50/p95/p99 use execution_duration with type=wait."""
-        from monad_monitor.api_server import PROMETHEUS_QUERIES
-        for key in ("rpc_wait_p50", "rpc_wait_p95", "rpc_wait_p99"):
-            assert key in PROMETHEUS_QUERIES, f"{key} missing from PROMETHEUS_QUERIES"
-            query = PROMETHEUS_QUERIES[key]
-            assert "execution_duration_seconds" in query
-            assert "histogram_quantile" in query
-            assert 'type="wait"' in query, f"{key} must filter type=wait"
-            formatted = query.format(name="TestVal")
-            assert "{name}" not in formatted
-            assert "TestVal" in formatted
-
-    def test_rpc_methods_latency_query_exists(self):
-        """rpc_methods_latency uses sum by(le,main) for per-method p99 breakdown."""
-        from monad_monitor.api_server import PROMETHEUS_QUERIES
-        assert "rpc_methods_latency" in PROMETHEUS_QUERIES
-        query = PROMETHEUS_QUERIES["rpc_methods_latency"]
-        assert "execution_duration_seconds" in query
-        assert "histogram_quantile" in query
-        assert "0.99" in query, "rpc_methods_latency must compute p99"
-        assert "sum by(le,main)" in query, "must group by main for per-method breakdown"
-        assert 'type="total"' in query
         formatted = query.format(name="TestVal")
         assert "{name}" not in formatted
         assert "TestVal" in formatted

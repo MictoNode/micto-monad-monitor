@@ -902,57 +902,6 @@
         ]
       },
       {
-        id: 'rpc',
-        title: 'RPC',
-        desc: 'JSON-RPC — active requests, latency, and per-method breakdown',
-        charts: [
-          {
-            id: 'rpc-active',
-            title: 'Active RPC Requests',
-            desc: 'Concurrent in-flight RPC requests (sum of all methods)',
-            keys: ['rpc_active'],
-            seriesLabels: ['Active']
-          },
-          {
-            id: 'rpc-duration',
-            title: 'RPC Execution Duration',
-            desc: 'Request processing time — p50, p95, p99 percentiles',
-            keys: ['rpc_exec_p50', 'rpc_exec_p95', 'rpc_exec_p99'],
-            seriesLabels: ['p50', 'p95', 'p99'],
-            transform: v => v != null ? v * 1000 : null,  // seconds -> ms
-            yTick: v => v.toFixed(1) + ' ms'
-          },
-          {
-            id: 'rpc-call-rate',
-            title: 'RPC Call Rate',
-            desc: 'Calls per second — each line is a different RPC method',
-            keys: ['rpc_call_rate'],
-            seriesLabels: ['Calls'],
-            multiResult: true,
-            yTick: v => v.toFixed(1) + ' /s'
-          },
-          {
-            id: 'rpc-wait',
-            title: 'RPC Wait Time',
-            desc: 'Queue wait time before execution begins — p50, p95, p99',
-            keys: ['rpc_wait_p50', 'rpc_wait_p95', 'rpc_wait_p99'],
-            seriesLabels: ['p50', 'p95', 'p99'],
-            transform: v => v != null ? v * 1000 : null,
-            yTick: v => v.toFixed(2) + ' ms'
-          },
-          {
-            id: 'rpc-methods',
-            title: 'RPC Methods Latency (p99)',
-            desc: 'Per-method worst-case latency — each line is a different method',
-            keys: ['rpc_methods_latency'],
-            seriesLabels: ['Latency'],
-            multiResult: true,
-            transform: v => v != null ? v * 1000 : null,
-            yTick: v => v.toFixed(2) + ' ms'
-          }
-        ]
-      },
-      {
         id: 'host',
         title: 'Host',
         desc: 'Server resources — CPU, memory, disk, network, and NVMe health',

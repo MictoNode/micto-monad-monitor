@@ -107,16 +107,6 @@ PROMETHEUS_QUERIES = {
     "txpool_drop_sig": 'rate(monad_bft_txpool_pool_drop_invalid_signature{{name="{name}"}}[5m])',
     "txpool_drop_malformed": 'rate(monad_bft_txpool_pool_drop_not_well_formed{{name="{name}"}}[5m])',
     "txpool_drop_not_ready": 'rate(monad_bft_txpool_pool_drop_pool_not_ready{{name="{name}"}}[5m])',
-    # RPC
-    "rpc_active": 'sum(monad_rpc_active_requests{{name="{name}"}})',
-    "rpc_exec_p50": 'histogram_quantile(0.50, sum by(le) (rate(monad_rpc_execution_duration_seconds_bucket{{type="total",name="{name}"}}[5m])))',
-    "rpc_exec_p95": 'histogram_quantile(0.95, sum by(le) (rate(monad_rpc_execution_duration_seconds_bucket{{type="total",name="{name}"}}[5m])))',
-    "rpc_exec_p99": 'histogram_quantile(0.99, sum by(le) (rate(monad_rpc_execution_duration_seconds_bucket{{type="total",name="{name}"}}[5m])))',
-    "rpc_call_rate": 'sum by(main) (rate(monad_rpc_execution_duration_seconds_count{{type="total",name="{name}"}}[5m]))',
-    "rpc_wait_p50": 'histogram_quantile(0.50, sum by(le) (rate(monad_rpc_execution_duration_seconds_bucket{{type="wait",name="{name}"}}[5m])))',
-    "rpc_wait_p95": 'histogram_quantile(0.95, sum by(le) (rate(monad_rpc_execution_duration_seconds_bucket{{type="wait",name="{name}"}}[5m])))',
-    "rpc_wait_p99": 'histogram_quantile(0.99, sum by(le) (rate(monad_rpc_execution_duration_seconds_bucket{{type="wait",name="{name}"}}[5m])))',
-    "rpc_methods_latency": 'histogram_quantile(0.99, sum by(le,main) (rate(monad_rpc_execution_duration_seconds_bucket{{type="total",name="{name}"}}[5m])))',
     # Host — CPU
     "cpu_user": 'sum by(mode) (rate(node_cpu_seconds_total{{mode="user",name="{name}"}}[5m])) / on() group_left count(count by(cpu)(node_cpu_seconds_total{{name="{name}"}}))',
     "cpu_system": 'sum by(mode) (rate(node_cpu_seconds_total{{mode="system",name="{name}"}}[5m])) / on() group_left count(count by(cpu)(node_cpu_seconds_total{{name="{name}"}}))',
@@ -159,7 +149,6 @@ OVERVIEW_QUERIES = {
     "proposals": 'monad_bft_txpool_create_proposal{{name="{name}"}}',
     "commits": 'monad_state_consensus_events_commit_block{{name="{name}"}}',
     "local_timeouts": 'monad_state_consensus_events_local_timeout{{name="{name}"}}',
-    "rpc_requests": 'sum(monad_rpc_active_requests{{name="{name}"}})',
 }
 
 
