@@ -94,8 +94,9 @@ You should get a **"Monad Monitor Started"** message on your configured alert ch
 | **High Resources (Critical)** | CPU/RAM/Disk ≥ 95% | Telegram + Pushover + Discord + Slack |
 | **High Resources (Warning)** | CPU/RAM/Disk ≥ 90% | Telegram + Discord + Slack |
 | **Active Set Changes** | Enters or leaves active set | Telegram + Discord + Slack |
+| **Active Set Exit Warning** | Huginn staking data lists your validator as leaving the active set next epoch (`monitoring.validator_set_warning`, on by default) | Telegram + Discord + Slack |
 | **Recovery** | Validator back online | Telegram + Discord + Slack |
-| **Extended Report** | 6-hour detailed report with uptime | Telegram + Discord + Slack |
+| **Extended Report** | 6-hour detailed report with 24h, 30d and all-time uptime | Telegram + Discord + Slack |
 
 **Alert Priority:**
 - **CRITICAL** → Telegram + Pushover + Discord + Slack (bypasses rate limits)
@@ -307,6 +308,7 @@ monitoring:
   check_interval: 60           # Seconds between checks
   alert_threshold: 3           # Failures before alerting
   huginn_timeout_alert_threshold: 3  # Min missed rounds seen by network before CRITICAL (per check window)
+  validator_set_warning: true  # WARN when Huginn staking data shows your validator leaving the active set next epoch
   extended_report_interval: 21600  # 6-hour detailed report
 
 thresholds:
@@ -363,7 +365,7 @@ Each validator card displays:
 | **Status** | ACTIVE / WARNING / INACTIVE / CRITICAL |
 | **Height** | Current block height |
 | **Peers** | Connected peer count |
-| **Uptime** | Huginn uptime percentage |
+| **Uptime (24h)** | Huginn participation for the rolling 24h window; the card also shows the 30d and all-time percentages, plus cumulative finalized/timeout counts and Huginn liveness |
 | **Fails** | Consecutive check failures |
 
 - **5-second auto-refresh** - Real-time updates
@@ -433,7 +435,7 @@ Production-grade metrics dashboard with Prometheus time-series charts at `http:/
 
 ### Overview
 
-After login, the dashboard shows **6 stat boxes** and **27 time-series charts** across **7 collapsible sections**:
+After login, the dashboard shows **9 stat boxes** and **31 time-series charts** across **7 collapsible sections**:
 
 | Stat Box | Description |
 |----------|-------------|
@@ -442,7 +444,10 @@ After login, the dashboard shows **6 stat boxes** and **27 time-series charts** 
 | **Sync Status** | In-sync / behind percentage |
 | **Self Stake** | Your validator's stake percentage |
 | **Total Peers** | Connected peer count |
-| **Uptime** | Validator uptime percentage |
+| **Node Runtime** | How long the validator node process has been running (from Monad metrics, not Huginn uptime) |
+| **Proposals** | Block proposals created by the validator |
+| **Committed Blocks** | Blocks committed by the validator |
+| **Local Timeouts** | Local consensus timeouts observed on this node |
 
 ### Chart Sections
 
@@ -656,7 +661,7 @@ micto-monad-monitor/
 
 | API | Purpose | Rate Limit |
 |-----|---------|------------|
-| [Huginn Tech](https://huginn.tech) | Validator uptime, active set (cumulative) | API v2: no per-validator limit documented; client caches 10 min |
+| [Huginn Tech](https://huginn.tech) | Validator uptime (rolling 24h, 30d and cumulative epoch snapshots), active set and next-epoch exit warnings | API v2: uptime/validator endpoints have no documented per-validator limit; client requests `period=all` + `period=30d` and merges `/health` for the 24h figure; caches 10 min. Staking endpoints (`/staking/validator-set`, `/validators`) are limited to **60 req/min/IP shared**, so they are fetched once per network per cache interval |
 | [gmonads.com](https://gmonads.com) | Network TPS, block fullness, fallback | 30 req/min |
 
 ---

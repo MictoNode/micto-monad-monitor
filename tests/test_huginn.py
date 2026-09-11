@@ -77,6 +77,42 @@ SAMPLE_STATUS_STALE_RESPONSE = {
     "uptime_events": {"count": 571204, "seconds_since_newest": 600},
 }
 
+# /validators/uptime/{secp}?period=30d - the middle horizon between the rolling
+# 24h window and the all-time cumulative totals.
+SAMPLE_UPTIME_30D_RESPONSE = {
+    "success": True,
+    "period": "30d",
+    "uptime": {
+        "validator_id": 42,
+        "validator_name": "Test Validator",
+        "status": "active",
+        "finalized_count": 32300,
+        "timeout_count": 119,
+        "total_events": 32419,
+    },
+}
+
+# /staking/validator-set - consensus vs next-epoch vs eligible sets
+SAMPLE_VALIDATOR_SET_RESPONSE = {
+    "success": True,
+    "epoch": 1233,
+    "in_delay_period": False,
+    "counts": {
+        "active": 200,
+        "next_epoch": 200,
+        "eligible": 208,
+        "entering": 8,
+        "leaving": 2,
+        "eligible_not_active": 8,
+    },
+    "entering": [{"validator_id": 231, "name": "Example", "stake": 10500000}],
+    "leaving": [
+        {"validator_id": 67, "name": "Unity Nodes", "stake": 11000000},
+        {"validator_id": 68, "name": "Imperator.co", "stake": 11000000},
+    ],
+    "eligible_not_active": [],
+}
+
 # Endpoint URLs
 TESTNET_API = "https://validator-api-testnet.huginn.tech/monad-api"
 MAINNET_API = "https://validator-api.huginn.tech/monad-api"
@@ -937,3 +973,224 @@ class TestHuginnFreshnessGate:
 
             status_calls = [c for c in rsps.calls if c.request.url.endswith("/status")]
             assert len(status_calls) == 1
+
+
+class TestUptime30dWindow:
+    """Huginn API v2: 30d cumulative window merged beside the all-time totals"""
+
+    @pytest.fixture
+    def client(self):
+        return HuginnClient(config=HuginnConfig())
+
+    def test_30d_window_merged_without_touching_all_time(self, client):
+        secp = "0xwindow30d"
+
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.GET,
+                f"{TESTNET_API}/validators/uptime/{secp}?period=all",
+                json=SAMPLE_ACTIVE_VALIDATOR_RESPONSE,
+                status=200,
+            )
+            rsps.add(
+                responses.GET,
+                f"{TESTNET_API}/validators/uptime/{secp}?period=30d",
+                json=SAMPLE_UPTIME_30D_RESPONSE,
+                status=200,
+            )
+
+            result = client.get_validator_uptime(secp, network="testnet")
+
+            # All-time figures keep their own values
+            assert result.uptime_percent == 100.0
+            assert result.total_events == 1500
+            # ...and the 30d window rides alongside
+            assert result.uptime_30d == 99.63
+            assert result.finalized_count_30d == 32300
+            assert result.timeout_count_30d == 119
+            assert result.total_events_30d == 32419
+
+    def test_30d_window_in_serialized_payload(self, client):
+        secp = "0xwindow30d"
+
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.GET,
+                f"{TESTNET_API}/validators/uptime/{secp}?period=all",
+                json=SAMPLE_ACTIVE_VALIDATOR_RESPONSE,
+                status=200,
+            )
+            rsps.add(
+                responses.GET,
+                f"{TESTNET_API}/validators/uptime/{secp}?period=30d",
+                json=SAMPLE_UPTIME_30D_RESPONSE,
+                status=200,
+            )
+
+            payload = client.get_validator_uptime(secp, network="testnet").to_dict()
+
+            assert payload["uptime_30d"] == 99.63
+            assert payload["timeout_count_30d"] == 119
+            assert payload["total_events_30d"] == 32419
+
+    def test_30d_window_failure_leaves_other_fields_intact(self, client):
+        secp = "0xwindowfail"
+
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.GET,
+                f"{TESTNET_API}/validators/uptime/{secp}?period=all",
+                json=SAMPLE_ACTIVE_VALIDATOR_RESPONSE,
+                status=200,
+            )
+            # /30d intentionally NOT mocked -> request error -> window unknown
+
+            result = client.get_validator_uptime(secp, network="testnet")
+
+            assert result is not None
+            assert result.uptime_30d is None
+            assert result.total_events_30d is None
+            assert result.uptime_percent == 100.0
+            assert result.is_active is True
+
+    def test_30d_window_without_events_reports_no_data(self, client):
+        secp = "0xwindownoevents"
+
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.GET,
+                f"{TESTNET_API}/validators/uptime/{secp}?period=all",
+                json=SAMPLE_ACTIVE_VALIDATOR_RESPONSE,
+                status=200,
+            )
+            rsps.add(
+                responses.GET,
+                f"{TESTNET_API}/validators/uptime/{secp}?period=30d",
+                json={
+                    "success": True,
+                    "period": "30d",
+                    "uptime": {
+                        "validator_id": 42,
+                        "status": "inactive",
+                        "finalized_count": 0,
+                        "timeout_count": 0,
+                        "total_events": 0,
+                    },
+                },
+                status=200,
+            )
+
+            result = client.get_validator_uptime(secp, network="testnet")
+
+            # No events must not be rendered as 0% uptime
+            assert result.uptime_30d is None
+            assert result.total_events_30d == 0
+
+
+class TestValidatorSet:
+    """Huginn staking API: next-epoch exit detection"""
+
+    @pytest.fixture
+    def client(self):
+        return HuginnClient(config=HuginnConfig())
+
+    @pytest.fixture
+    def validator_set_url(self):
+        return f"{TESTNET_API}/staking/validator-set"
+
+    def test_leaving_ids_are_detected(self, client, validator_set_url):
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.GET,
+                validator_set_url,
+                json=SAMPLE_VALIDATOR_SET_RESPONSE,
+                status=200,
+            )
+
+            state = client.get_validator_set("testnet")
+
+            assert state.epoch == 1233
+            assert state.in_delay_period is False
+            assert state.counts["leaving"] == 2
+            assert state.is_leaving(67) is True
+            assert state.is_leaving(224) is False
+            assert state.is_leaving(None) is False
+
+    def test_validator_set_cached_per_network(self, client, validator_set_url):
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.GET,
+                validator_set_url,
+                json=SAMPLE_VALIDATOR_SET_RESPONSE,
+                status=200,
+            )
+
+            first = client.get_validator_set("testnet")
+            second = client.get_validator_set("testnet")
+
+            assert first is second
+            assert len(rsps.calls) == 1
+
+    def test_validator_set_failure_keeps_last_known_state(self, client, validator_set_url):
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.GET,
+                validator_set_url,
+                json=SAMPLE_VALIDATOR_SET_RESPONSE,
+                status=200,
+            )
+            client.get_validator_set("testnet")
+
+        client.config.check_interval = 0  # force a refresh attempt
+        with responses.RequestsMock():
+            # /staking/validator-set intentionally NOT mocked -> request error
+            state = client.get_validator_set("testnet")
+
+        assert state is not None
+        assert state.epoch == 1233
+
+    def test_validator_set_failure_without_cache_is_none(self, client):
+        with responses.RequestsMock():
+            assert client.get_validator_set("testnet") is None
+
+    def test_secp_to_id_map_paginates_and_caches(self, client):
+        secp_a = "0xaaa"
+        secp_b = "0xbbb"
+        secp_c = "0xccc"
+
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.GET,
+                f"{TESTNET_API}/validators?limit=500&offset=0",
+                json={
+                    "success": True,
+                    "count": 2,
+                    "total": 3,
+                    "validators": [
+                        {"id": 1, "secp_address": secp_a},
+                        {"id": 2, "secp_address": secp_b},
+                    ],
+                },
+                status=200,
+            )
+            rsps.add(
+                responses.GET,
+                f"{TESTNET_API}/validators?limit=500&offset=2",
+                json={
+                    "success": True,
+                    "count": 1,
+                    "total": 3,
+                    "validators": [{"id": 3, "secp_address": secp_c}],
+                },
+                status=200,
+            )
+
+            assert client.get_validator_id(secp_b, network="testnet") == 2
+            # Remaining ids come from the cached map, not a third page request
+            assert client.get_validator_id(secp_c, network="testnet") == 3
+            assert client.get_validator_id("0xunknown", network="testnet") is None
+            assert len(rsps.calls) == 2
+
+    def test_validator_id_without_secp_is_none(self, client):
+        assert client.get_validator_id(None, network="testnet") is None
+        assert client.get_validator_id("", network="testnet") is None

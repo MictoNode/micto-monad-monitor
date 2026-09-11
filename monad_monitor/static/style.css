@@ -2,6 +2,14 @@
  * Clean, professional blockchain monitoring aesthetic
  * Brand colors: Purple #836EF9, Dark #0E091C, Cyan #85E6FF
  * Responsive: 2K, 1080p, Tablet, Mobile
+ *
+ * TOKEN SYNC: this token block is paired with the inline token block in
+ * monad_monitor/static_dashboard/index.html. Keep shared role names and values
+ * identical in both files.
+ * Intentional hue divergence: here --status-warning is pink (#FF8EE4) and
+ * --status-critical is amber (#FFAE45); the metrics dashboard maps its amber
+ * "warning" and red "down" roles differently. That difference is deliberate -
+ * do not "fix" it by recolouring either dashboard.
  */
 
 /* ============================================
@@ -510,6 +518,7 @@ body {
 .metric {
     display: flex;
     flex-direction: column;
+    justify-content: space-between;
     gap: var(--space-1);
     min-width: 0;
 }
@@ -618,6 +627,71 @@ body {
 }
 
 /* ============================================
+   Uptime Windows (always-visible chips)
+   ============================================ */
+.uptime-windows {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding-bottom: var(--space-3);
+    margin-bottom: var(--space-3);
+    border-bottom: 1px solid var(--border-default);
+}
+
+/* Rows never wrap: the three window chips and the two timeout chips stay on
+   one line each so their values keep their column alignment. */
+.uptime-window-row {
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: space-between;
+    gap: var(--space-2);
+}
+
+/* Exception: a very large timeout count (e.g. 1,234,567) can make the two
+   timeout chips wider than a narrow card. That row splits onto two lines
+   rather than truncating a label - the uptime row above always stays on one. */
+.uptime-window-row--wrap {
+    flex-wrap: wrap;
+}
+
+.uptime-window-row--wrap .uptime-chip {
+    flex: 1 1 auto;
+}
+
+.uptime-window-row--wrap .uptime-chip-label {
+    overflow: visible;
+    text-overflow: clip;
+}
+
+.uptime-chip {
+    flex: 1 1 0;
+    min-width: 0;
+    display: inline-flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-1);
+    padding: 2px 5px;
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.03);
+    font-family: var(--font-mono);
+    font-size: 0.5625rem;
+    white-space: nowrap;
+}
+
+.uptime-chip-label {
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.uptime-chip-value {
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+/* ============================================
    Expandable Details
    ============================================ */
 .card-details {
@@ -633,6 +707,7 @@ body {
 .detail-item {
     display: flex;
     flex-direction: column;
+    justify-content: space-between;
     gap: var(--space-1);
 }
 
@@ -690,7 +765,9 @@ body {
 .card-footer {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: var(--space-1);
+    row-gap: var(--space-1);
     margin-top: var(--space-3);
 }
 
@@ -704,6 +781,16 @@ body {
     font-family: var(--font-mono);
     font-size: 0.6875rem;
     color: var(--text-secondary);
+}
+
+/* Huginn liveness sits at the far end of the footer; state is also written
+   as text so the stale treatment is never colour-only. */
+.huginn-liveness {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--text-secondary);
+    margin-left: auto;
+    white-space: nowrap;
 }
 
 /* ============================================
@@ -739,6 +826,24 @@ body {
     font-family: var(--font-mono);
     font-size: 0.6875rem;
     color: var(--text-muted);
+}
+
+/* ============================================
+   Stale Huginn State
+   Distinct treatment reusing existing muted/inactive tokens only.
+   ============================================ */
+.validator-card.card--stale {
+    background-color: var(--bg-secondary);
+    border-color: var(--border-hover);
+}
+
+.validator-card.card--stale .metric-uptime,
+.validator-card.card--stale .uptime-chip-value {
+    color: var(--status-inactive);
+}
+
+.validator-card.card--stale .huginn-liveness {
+    color: var(--status-inactive);
 }
 
 /* ============================================
@@ -901,6 +1006,10 @@ body {
         font-size: 0.875rem;
     }
 
+    .uptime-chip {
+        font-size: 0.625rem;
+    }
+
     #connection-status,
     .refresh-badge,
     .footer-credit {
@@ -964,6 +1073,10 @@ body {
     .card-metrics {
         gap: var(--space-5);
     }
+
+    .uptime-chip {
+        font-size: 0.625rem;
+    }
 }
 
 /* Small Desktop / Large Tablet (1024px - 1199px) */
@@ -982,6 +1095,10 @@ body {
 
     .validators-container {
         grid-template-columns: repeat(2, 1fr);
+    }
+
+    .uptime-chip {
+        font-size: 0.625rem;
     }
 }
 

@@ -7,7 +7,7 @@ Multi-validator stratejisi ile ag round referansi alir ve circuit breaker ile da
 import time
 import logging
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from enum import Enum, auto
 
 import requests
@@ -38,9 +38,18 @@ CIRCUIT_BREAKER_RECOVERY_TIME = 60  # seconds
 # (the semantics this monitor's counters were designed around).
 VALIDATOR_UPTIME_PATH = "/validators/uptime/"
 UPTIME_PERIOD_QUERY = "?period=all"
+UPTIME_30D_PERIOD_QUERY = "?period=30d"
 VALIDATOR_PATH = "/validators/"
+VALIDATORS_LIST_PATH = "/validators"
 VALIDATOR_HEALTH_SUFFIX = "/health"
+VALIDATOR_SET_PATH = "/staking/validator-set"
 STATUS_PATH = "/status"
+
+# /validators pagination for the secp -> validator_id map. The staking API is
+# limited to 60 req/min/IP shared across ALL staking calls, so the map is
+# fetched in as few pages as possible and cached per network.
+VALIDATORS_PAGE_LIMIT = 500
+MAX_VALIDATOR_PAGES = 10
 
 # Validator API "status" field values (v2)
 STATUS_ACTIVE = "active"
@@ -103,7 +112,7 @@ class ValidatorUptime:
     secp_address: str
     is_active: Optional[bool]  # True/False from API status field, None if unknown → gmonads fallback
     is_ever_active: bool  # Has ever been in active set (total_events > 0)
-    uptime_percent: float
+    uptime_percent: float  # cumulative (period=all) since the epoch snapshots begin
     finalized_count: int
     timeout_count: int
     total_events: int
@@ -116,6 +125,13 @@ class ValidatorUptime:
     health_state: Optional[str] = None  # "healthy"/"stale"/"no_data"/... from Huginn /health
     seconds_since_last_event: Optional[int] = None  # network-side liveness (seconds)
     last_event_utc: Optional[str] = None  # newest observed round event (UTC)
+    # 30d cumulative window (best-effort; None when the window call failed or
+    # the validator had no events in it - see total_events_30d to tell those
+    # apart, which matters for validators sitting outside the active set)
+    uptime_30d: Optional[float] = None
+    finalized_count_30d: Optional[int] = None
+    timeout_count_30d: Optional[int] = None
+    total_events_30d: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""
@@ -137,6 +153,44 @@ class ValidatorUptime:
             "health_state": self.health_state,
             "seconds_since_last_event": self.seconds_since_last_event,
             "last_event_utc": self.last_event_utc,
+            "uptime_30d": self.uptime_30d,
+            "finalized_count_30d": self.finalized_count_30d,
+            "timeout_count_30d": self.timeout_count_30d,
+            "total_events_30d": self.total_events_30d,
+        }
+
+
+@dataclass
+class ValidatorSetState:
+    """
+    Consensus vs snapshot vs execution set comparison (Huginn staking API).
+
+    `leaving` is the actionable part: validators in the current consensus set
+    that are NOT in the next epoch's snapshot set, i.e. who is about to drop
+    out. It carries only validator_id/name/stake - no secp - so callers match
+    against their own validator through get_validator_id().
+    """
+    network: str
+    epoch: Optional[int]
+    in_delay_period: bool
+    counts: Dict[str, int]
+    leaving_ids: set
+    leaving: List[Dict[str, Any]]
+    fetched_at: float
+
+    def is_leaving(self, validator_id: Optional[int]) -> bool:
+        """Whether the given validator id is set to leave next epoch"""
+        return validator_id is not None and validator_id in self.leaving_ids
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization"""
+        return {
+            "network": self.network,
+            "epoch": self.epoch,
+            "in_delay_period": self.in_delay_period,
+            "counts": dict(self.counts),
+            "leaving": list(self.leaving),
+            "fetched_at": self.fetched_at,
         }
 
 
@@ -226,6 +280,12 @@ class HuginnClient:
         self._cache_times: Dict[str, float] = {}
         # /status freshness cache: key "network" -> {"seconds_since_newest": int|None, "checked_at": float}
         self._status_cache: Dict[str, Dict[str, Any]] = {}
+        # Staking enrichment caches (network-level, see get_validator_set /
+        # get_validator_id). Kept apart from the per-validator uptime cache.
+        self._validator_set_cache: Dict[str, ValidatorSetState] = {}
+        self._validator_set_times: Dict[str, float] = {}
+        self._secp_id_cache: Dict[str, Dict[str, int]] = {}
+        self._secp_id_times: Dict[str, float] = {}
         # Circuit breaker for each network
         self._circuit_breakers: Dict[str, CircuitBreaker] = {}
         # Logger
@@ -326,7 +386,9 @@ class HuginnClient:
 
         Best-effort /validators/{secp}/health merge restores last_round /
         last_block_height (removed from the v2 uptime payload) and adds
-        uptime_24h / health_state / seconds_since_last_event.
+        uptime_24h / health_state / seconds_since_last_event. A second
+        best-effort call fills the 30d cumulative window (uptime_30d and its
+        counters), so callers can show 24h / 30d / all-time side by side.
 
         Args:
             secp_address: The validator's secp256k1 public key
@@ -368,6 +430,8 @@ class HuginnClient:
         if uptime:
             # Merge /health liveness fields (best-effort, never fails the fetch)
             self._enrich_with_health(uptime, base_url, network)
+            # Merge the 30d cumulative window (best-effort)
+            self._enrich_with_30d_window(uptime, base_url, network)
             # Downgrade inactive/pending verdicts when Huginn data is stale
             self._apply_freshness_gate(uptime, network)
 
@@ -468,6 +532,33 @@ class HuginnClient:
         uptime.health_state = health.get("state")
         uptime.seconds_since_last_event = health.get("seconds_since_last_event")
         uptime.last_event_utc = health.get("last_event_utc")
+
+    def _enrich_with_30d_window(
+        self, uptime: ValidatorUptime, base_url: str, network: str
+    ) -> None:
+        """
+        Best-effort merge of the 30d cumulative window (?period=30d).
+
+        Gives operators a middle horizon between the rolling 24h figure and the
+        all-time totals. `uptime_30d` stays None when the call fails OR when the
+        window holds no events at all (a validator outside the active set) -
+        `total_events_30d` tells those apart, so callers never render "0%" for
+        "no data".
+        """
+        url = f"{base_url}{VALIDATOR_UPTIME_PATH}{uptime.secp_address}{UPTIME_30D_PERIOD_QUERY}"
+        response_data = self._get_json_aux(url, network, uptime.secp_address)
+        if not isinstance(response_data, dict):
+            return
+        window = response_data.get("uptime", response_data)
+        if not isinstance(window, dict):
+            return
+
+        total_events = window.get("total_events") or 0
+        finalized = window.get("finalized_count") or 0
+        uptime.total_events_30d = total_events
+        uptime.finalized_count_30d = finalized
+        uptime.timeout_count_30d = window.get("timeout_count") or 0
+        uptime.uptime_30d = round((finalized / total_events) * 100, 2) if total_events > 0 else None
 
     def _is_huginn_data_stale(self, network: str) -> bool:
         """
@@ -600,6 +691,147 @@ class HuginnClient:
             fetched_at=time.time(),
         )
 
+    def get_validator_set(self, network: str = "testnet") -> Optional[ValidatorSetState]:
+        """
+        Consensus vs next-epoch vs eligible set comparison for a network.
+
+        This is the only source of a *forward-looking* answer ("your validator
+        is leaving the active set next epoch"); the per-validator uptime
+        `status` field only ever describes the current epoch.
+
+        Fetched with the auxiliary single-shot path (no circuit-breaker
+        involvement) because this is enrichment, not the canonical verdict: a
+        staking outage must not block uptime checks. Cached per network for
+        check_interval; on failure the previous cached state is returned.
+
+        Args:
+            network: Network name ('testnet' or 'mainnet'). Defaults to 'testnet'.
+
+        Returns:
+            ValidatorSetState if available, None if never fetched successfully
+        """
+        cache_key = network.lower()
+        now = time.time()
+        cached_time = self._validator_set_times.get(cache_key, 0)
+        if cache_key in self._validator_set_cache and \
+                now - cached_time < self.config.check_interval:
+            return self._validator_set_cache[cache_key]
+
+        base_url = self.config.get_endpoint(network)
+        data = self._get_json_aux(f"{base_url}{VALIDATOR_SET_PATH}", network)
+        state = self._parse_validator_set(data, network) if isinstance(data, dict) else None
+
+        if state is None:
+            return self._validator_set_cache.get(cache_key)
+
+        self._validator_set_cache[cache_key] = state
+        self._validator_set_times[cache_key] = now
+        return state
+
+    def _parse_validator_set(
+        self, data: Dict[str, Any], network: str
+    ) -> Optional[ValidatorSetState]:
+        """Parse /staking/validator-set into ValidatorSetState."""
+        if not data:
+            return None
+
+        leaving = data.get("leaving") or []
+        if not isinstance(leaving, list):
+            leaving = []
+        leaving_ids = {
+            entry.get("validator_id")
+            for entry in leaving
+            if isinstance(entry, dict) and entry.get("validator_id") is not None
+        }
+
+        counts = data.get("counts") or {}
+        return ValidatorSetState(
+            network=network,
+            epoch=data.get("epoch"),
+            in_delay_period=bool(data.get("in_delay_period")),
+            counts=dict(counts) if isinstance(counts, dict) else {},
+            leaving_ids=leaving_ids,
+            leaving=[entry for entry in leaving if isinstance(entry, dict)],
+            fetched_at=time.time(),
+        )
+
+    def get_validator_id(
+        self, secp_address: Optional[str], network: str = "testnet"
+    ) -> Optional[int]:
+        """
+        Resolve a validator's secp256k1 key to its numeric API id.
+
+        /staking/validator-set reports enter/leave lists as id+name only, so the
+        secp -> id map is what lets callers recognise their own validator there.
+
+        Args:
+            secp_address: The validator's secp256k1 public key
+            network: Network name ('testnet' or 'mainnet'). Defaults to 'testnet'.
+
+        Returns:
+            Validator id if known, None otherwise
+        """
+        if not secp_address:
+            return None
+        return self._get_secp_id_map(network).get(secp_address.lower())
+
+    def _get_secp_id_map(self, network: str) -> Dict[str, int]:
+        """
+        Cached {secp_address -> validator_id} map for a network.
+
+        Pages through /validators (limit/offset) and caches per network for
+        check_interval. Failures return whatever was cached before (or an empty
+        map) rather than raising - callers treat a missing id as "unknown".
+        """
+        cache_key = network.lower()
+        now = time.time()
+        cached = self._secp_id_cache.get(cache_key)
+        if cached is not None and \
+                now - self._secp_id_times.get(cache_key, 0) < self.config.check_interval:
+            return cached
+
+        base_url = self.config.get_endpoint(network)
+        mapping = self._fetch_secp_id_map(base_url, network)
+        if not mapping:
+            return cached if cached is not None else {}
+
+        self._secp_id_cache[cache_key] = mapping
+        self._secp_id_times[cache_key] = now
+        return mapping
+
+    def _fetch_secp_id_map(self, base_url: str, network: str) -> Dict[str, int]:
+        """Page through /validators and build the secp -> id map."""
+        mapping: Dict[str, int] = {}
+        offset = 0
+
+        for _ in range(MAX_VALIDATOR_PAGES):
+            url = (
+                f"{base_url}{VALIDATORS_LIST_PATH}"
+                f"?limit={VALIDATORS_PAGE_LIMIT}&offset={offset}"
+            )
+            data = self._get_json_aux(url, network)
+            if not isinstance(data, dict):
+                break
+
+            validators = data.get("validators") or []
+            if not isinstance(validators, list):
+                break
+
+            for entry in validators:
+                if not isinstance(entry, dict):
+                    continue
+                secp = entry.get("secp_address")
+                validator_id = entry.get("id")
+                if secp and validator_id is not None:
+                    mapping[str(secp).lower()] = validator_id
+
+            offset += len(validators)
+            total = data.get("total")
+            if not validators or not isinstance(total, int) or offset >= total:
+                break
+
+        return mapping
+
     def is_validator_active(
         self, secp_address: Optional[str], network: str = "testnet"
     ) -> Optional[bool]:
@@ -640,6 +872,11 @@ class HuginnClient:
         """Clear all cached data"""
         self._cache.clear()
         self._cache_times.clear()
+        self._status_cache.clear()
+        self._validator_set_cache.clear()
+        self._validator_set_times.clear()
+        self._secp_id_cache.clear()
+        self._secp_id_times.clear()
 
     def get_cache_age(
         self, secp_address: str, network: str = "testnet"

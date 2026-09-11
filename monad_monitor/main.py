@@ -17,13 +17,14 @@ from .config import (
     validate_config,
     validate_validators,
     ConfigValidationError,
+    ValidatorConfig,
 )
 from .cross_validation import CrossValidator
 from .dashboard_server import DashboardServer
 from .gmonads import GmonadsClient
 from .health_report import HealthReporter
 from .health_server import HealthServer
-from .huginn import HuginnClient
+from .huginn import HuginnClient, ValidatorSetState
 from .logger import init_logger, get_logger, debug, info, warning, error
 from .state_machine import ValidatorStateMachine, ValidatorState
 from .validator import ValidatorHealthChecker, SystemThresholds
@@ -53,6 +54,104 @@ def timeout_increase_to_report(
         return 0
     increase = current_timeout_count - last_timeout_count
     return increase if increase >= threshold else 0
+
+
+def warn_if_leaving_next_epoch(
+    enabled: bool,
+    validator: ValidatorConfig,
+    state: Dict[str, Any],
+    huginn_data: Optional[Dict[str, Any]],
+    validator_set: Optional[ValidatorSetState],
+    huginn_client: Optional[HuginnClient],
+    alerts: AlertHandler,
+) -> bool:
+    """Warn once per epoch when a validator is set to leave the active set.
+
+    The Huginn staking validator-set endpoint is the only forward-looking
+    source: it lists the validators that are in the current consensus set but
+    not in the next epoch's snapshot. This helper sends a WARNING (Telegram +
+    Discord + Slack, never Pushover) when all of the following hold:
+
+    - the feature is enabled in config;
+    - the validator set is available;
+    - the validator's secp address resolves to an API id;
+    - that id is in the leaving list;
+    - the validator is currently active (Huginn ``is_active``);
+    - the epoch differs from the one already warned about.
+
+    Fail-open by design: missing/failed Huginn data skips the warning and
+    never raises. The warned epoch is remembered on the validator state so a
+    later check in the same epoch does not repeat the alert.
+
+    Returns:
+        True if a warning was sent, False otherwise.
+    """
+    if not enabled:
+        debug(f"{validator.name}: validator set warning disabled - skipping")
+        return False
+
+    if validator_set is None:
+        debug(f"{validator.name}: validator set unavailable - skipping next-epoch exit warning")
+        return False
+
+    if not huginn_data or huginn_data.get("is_active") is not True:
+        debug(f"{validator.name}: not in active set - skipping next-epoch exit warning")
+        return False
+
+    network = validator.network or "testnet"
+    validator_id = (
+        huginn_client.get_validator_id(validator.validator_secp, network)
+        if huginn_client
+        else None
+    )
+    if validator_id is None:
+        debug(f"{validator.name}: unresolved validator id on {network} - skipping next-epoch exit warning")
+        return False
+
+    if not validator_set.is_leaving(validator_id):
+        debug(
+            f"{validator.name}: not in leaving list for epoch {validator_set.epoch} "
+            f"- no next-epoch exit warning"
+        )
+        return False
+
+    epoch = validator_set.epoch
+    if state.get("last_validator_set_warning_epoch") == epoch:
+        debug(f"{validator.name}: already warned about leaving in epoch {epoch} - skipping")
+        return False
+
+    stake = next(
+        (
+            entry.get("stake")
+            for entry in validator_set.leaving
+            if entry.get("validator_id") == validator_id
+        ),
+        None,
+    )
+
+    message = (
+        f"*{validator.name}*\n\n"
+        f"⚠️ Leaving Active Set Next Epoch\n\n"
+        f"Huginn staking data: validator id {validator_id} is in the "
+        f"leaving list for epoch {epoch} (stake {stake})."
+    )
+    if validator_set.in_delay_period:
+        message += (
+            "\n\nThe network is in a delay period; the transition may slip"
+            " one further epoch."
+        )
+
+    alert_success = alerts.alert_warning(message)
+    if not alert_success:
+        error(f"Failed to send next-epoch exit warning for {validator.name}")
+        return False
+
+    state["last_validator_set_warning_epoch"] = epoch
+    info(
+        f"⚠️ {validator.name}: leaving active set next epoch "
+        f"(validator id {validator_id}, epoch {epoch}) - warning sent"
+    )
+    return True
 
 
 def signal_handler(sig, frame):
@@ -254,6 +353,7 @@ def main():
             "ts_fails": 0,  # Consecutive ts_validation_fail increases (separate from main fails)
             "ts_alert_active": False,  # Whether ts_validation_fail alert is currently active
             "last_huginn_timeout_count": None,  # Track Huginn timeout count (network-visible timeouts)
+            "last_validator_set_warning_epoch": None,  # Epoch of last next-epoch exit warning (M4)
         }
         # Sanitize validator name for filename (replace spaces and special chars)
         safe_name = v.name.replace(" ", "_").replace("/", "_").replace("\\", "_")
@@ -273,6 +373,9 @@ def main():
     # Huginn network-visible timeout alert threshold (min missed rounds per check window)
     huginn_timeout_alert_threshold = config["monitoring"].get("huginn_timeout_alert_threshold", 1)
 
+    # Next-epoch active set exit warning (Huginn staking data), on by default
+    validator_set_warning_enabled = config["monitoring"].get("validator_set_warning", True)
+
     # Send startup notification
     health_reporter.send_startup_report(validators)
     info(f"Monitor started - {len(validators)} validators | Log level: {log_level}")
@@ -283,6 +386,8 @@ def main():
             timestamp = datetime.now().strftime("%H:%M:%S")
             all_healthy = True
             health_server_validators: Dict[str, Dict[str, Any]] = {}
+            # Huginn staking validator set, fetched at most once per network per iteration
+            validator_set_cache: Dict[str, Optional[ValidatorSetState]] = {}
 
             for validator in validators:
                 if not running:
@@ -405,6 +510,31 @@ def main():
                         # local_timeout metric tracks OTHER nodes' timeouts, not our validator's status
                         # We rely on gmonads fallback (already implemented) and local health metrics
                         debug(f"Huginn unavailable for {validator.name}, relying on gmonads and local metrics")
+
+                # M4: warn once per epoch when this validator is set to leave
+                # the active set next epoch. The validator set is fetched at
+                # most once per network per iteration (see validator_set_cache).
+                network = validator.network or "testnet"
+                if validator_set_warning_enabled and network not in validator_set_cache:
+                    try:
+                        validator_set_cache[network] = (
+                            huginn_client.get_validator_set(network)
+                            if huginn_client
+                            else None
+                        )
+                    except Exception as e:
+                        debug(f"Validator set fetch failed for {network}: {e}")
+                        validator_set_cache[network] = None
+
+                warn_if_leaving_next_epoch(
+                    enabled=validator_set_warning_enabled,
+                    validator=validator,
+                    state=state,
+                    huginn_data=health_status.huginn_data,
+                    validator_set=validator_set_cache.get(network),
+                    huginn_client=huginn_client,
+                    alerts=alerts,
+                )
 
                 # Update health server validator data
                 health_server_validators[validator.name] = {

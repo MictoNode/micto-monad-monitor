@@ -57,7 +57,7 @@
         activeCount: document.getElementById('active-count'),
         warningCount: document.getElementById('warning-count'),
         criticalCount: document.getElementById('critical-count'),
-        monitorUptime: document.getElementById('monitor-uptime'),
+        monitorRuntime: document.getElementById('monitor-runtime'),
     };
 
     // ---------------------------------------------------------------------------
@@ -89,6 +89,78 @@
     }
 
     /**
+     * Uptime value shown on the card: the rolling 24h figure when Huginn's
+     * /health merge provided one, else the cumulative (all-time) figure.
+     * @param {Object} huginn - Validator huginn_data
+     * @returns {number|null}
+     */
+    function displayedUptime(huginn) {
+        if (!huginn) {
+            return null;
+        }
+        if (huginn.uptime_24h !== null && huginn.uptime_24h !== undefined) {
+            return huginn.uptime_24h;
+        }
+        if (huginn.uptime_percent !== null && huginn.uptime_percent !== undefined) {
+            return huginn.uptime_percent;
+        }
+        return null;
+    }
+
+    /**
+     * Format a percentage for the compact window chips, using '--' when the
+     * window is absent (a missing window is not the same as 0%).
+     * @param {number|null|undefined} percent
+     * @returns {string}
+     */
+    function formatUptimeWindow(percent) {
+        if (percent === null || percent === undefined || isNaN(percent)) {
+            return '--';
+        }
+        return percent.toFixed(2) + '%';
+    }
+
+    /**
+     * Format an event count for the window chips, using '--' when absent.
+     * @param {number|null|undefined} count
+     * @returns {string}
+     */
+    function formatCountOrDash(count) {
+        if (count === null || count === undefined || isNaN(count)) {
+            return '--';
+        }
+        return formatNumber(count);
+    }
+
+    /**
+     * Human-readable Huginn liveness state.
+     * @param {string|null|undefined} state
+     * @returns {string}
+     */
+    function healthStateText(state) {
+        if (!state) return 'unknown';
+        if (state === 'no_data') return 'no data';
+        return state;
+    }
+
+    /**
+     * Format a short "seconds ago" string for Huginn liveness.
+     * @param {number|null|undefined} seconds
+     * @returns {string}
+     */
+    function formatSecondsAgo(seconds) {
+        if (seconds === null || seconds === undefined || isNaN(seconds)) {
+            return '';
+        }
+        var sec = Math.max(0, Math.floor(seconds));
+        if (sec < SECONDS_PER_MINUTE) return sec + 's ago';
+        if (sec < SECONDS_PER_HOUR) {
+            return Math.floor(sec / SECONDS_PER_MINUTE) + 'm ago';
+        }
+        return Math.floor(sec / SECONDS_PER_HOUR) + 'h ago';
+    }
+
+    /**
      * Format a TPS value with one decimal and thousand separators.
      * @param {number} tps
      * @returns {string}
@@ -115,8 +187,9 @@
     }
 
     /**
-     * Format monitor uptime from seconds to human-readable string.
-     * Examples: "45s", "12m", "2h 15m", "3d 5h"
+     * Format a duration in seconds to a human-readable runtime string.
+     * Examples: "45s", "12m", "2h 15m", "3d 5h".
+     * Durations are "Runtime"; percentage figures keep the word "Uptime".
      * @param {number} seconds
      * @returns {string}
      */
@@ -291,15 +364,38 @@
             animateValue(el, oldVal, newVal, ANIMATION_DURATION_MS, check.formatter);
         });
 
-        // Uptime - not animated (it's a percent with decimals), but flash on change
+        // Uptime - not animated (it's a percent with decimals), but flash on
+        // change. Flashes against the same value the card displays.
         var oldUptime = prev && prev.huginn_data
-            ? (prev.huginn_data.uptime_percent) : null;
+            ? displayedUptime(prev.huginn_data) : null;
         var newUptime = curr.huginn_data
-            ? (curr.huginn_data.uptime_percent) : null;
+            ? displayedUptime(curr.huginn_data) : null;
         if (oldUptime !== null && oldUptime !== undefined &&
             newUptime !== null && newUptime !== undefined &&
             oldUptime !== newUptime) {
             flashElement(card.querySelector('.metric-uptime'));
+        }
+
+        // Uptime window chips flash when their own window value changes.
+        var oldHuginn = prev ? prev.huginn_data : null;
+        var newHuginn = curr.huginn_data;
+        if (oldHuginn && newHuginn) {
+            [
+                ['uptime_24h', '.window-uptime-24h'],
+                ['uptime_30d', '.window-uptime-30d'],
+                ['uptime_percent', '.window-uptime-all'],
+                ['timeout_count_30d', '.window-timeouts-30d'],
+                ['timeout_count', '.window-timeouts-all'],
+            ].forEach(function(pair) {
+                var key = pair[0];
+                var oldVal = oldHuginn[key];
+                var newVal = newHuginn[key];
+                if (oldVal !== null && oldVal !== undefined &&
+                    newVal !== null && newVal !== undefined &&
+                    oldVal !== newVal) {
+                    flashElement(card.querySelector(pair[1]));
+                }
+            });
         }
 
         // System metrics flash
@@ -650,20 +746,72 @@
             name + ', ' + statusText + ', ' + getNetworkDisplayName(network)
         );
 
-        // Uptime
+        // Uptime: the visible label must name the window the displayed value
+        // actually comes from (never claim 24h when showing the all-time figure).
+        var huginn = data.huginn_data || null;
+        var has24h = huginn !== null &&
+            huginn.uptime_24h !== null && huginn.uptime_24h !== undefined;
+        var uptimeLabel = card.querySelector('.metric-uptime-label');
+        if (uptimeLabel) {
+            uptimeLabel.textContent = has24h ? 'Uptime (24h)' : 'Uptime (all-time)';
+        }
+
         var uptimeEl = card.querySelector('.metric-uptime');
         if (uptimeEl) {
-            if (data.huginn_data &&
-                data.huginn_data.uptime_percent !== undefined &&
-                data.huginn_data.uptime_percent !== null) {
-                uptimeEl.textContent =
-                    formatUptimePercent(data.huginn_data.uptime_percent);
-                uptimeEl.title =
-                    'Finalized: ' + (data.huginn_data.finalized_count || 0) +
-                    ' / Timeouts: ' + (data.huginn_data.timeout_count || 0);
+            var shownUptime = displayedUptime(huginn);
+            if (shownUptime !== null) {
+                uptimeEl.textContent = formatUptimePercent(shownUptime);
+                // Tooltip is extra detail only; the window chips below are the
+                // always-visible source.
+                var tooltipParts = [];
+                if (has24h) {
+                    tooltipParts.push(
+                        'Uptime 24h: ' + formatUptimePercent(huginn.uptime_24h));
+                }
+                if (huginn.uptime_30d !== null && huginn.uptime_30d !== undefined) {
+                    tooltipParts.push(
+                        'Uptime 30d: ' + formatUptimePercent(huginn.uptime_30d));
+                }
+                if (huginn.uptime_percent !== null &&
+                    huginn.uptime_percent !== undefined) {
+                    tooltipParts.push(
+                        'Uptime all-time: ' + formatUptimePercent(huginn.uptime_percent));
+                }
+                tooltipParts.push(
+                    'Finalized all-time: ' + formatNumber(huginn.finalized_count || 0));
+                tooltipParts.push(
+                    'Timeouts all-time: ' + formatNumber(huginn.timeout_count || 0));
+                uptimeEl.title = tooltipParts.join(' | ');
             } else {
                 uptimeEl.textContent = 'N/A';
                 uptimeEl.title = 'Huginn data not available';
+            }
+        }
+
+        // Always-visible window chips; a missing window renders as '--'.
+        setTextSafe(card, '.window-uptime-24h',
+            formatUptimeWindow(huginn && huginn.uptime_24h));
+        setTextSafe(card, '.window-uptime-30d',
+            formatUptimeWindow(huginn && huginn.uptime_30d));
+        setTextSafe(card, '.window-uptime-all',
+            formatUptimeWindow(huginn && huginn.uptime_percent));
+        setTextSafe(card, '.window-timeouts-30d',
+            formatCountOrDash(huginn && huginn.timeout_count_30d));
+        setTextSafe(card, '.window-timeouts-all',
+            formatCountOrDash(huginn && huginn.timeout_count));
+
+        // Huginn liveness + stale treatment (reuses muted/inactive tokens).
+        var huginnState = huginn ? huginn.health_state : null;
+        var isStale = huginnState === 'stale' || huginnState === 'no_data';
+        card.classList.toggle('card--stale', isStale);
+        var livenessEl = card.querySelector('.huginn-liveness');
+        if (livenessEl) {
+            if (huginnState) {
+                var ago = formatSecondsAgo(huginn.seconds_since_last_event);
+                livenessEl.textContent = 'Huginn: ' + healthStateText(huginnState) +
+                    (ago ? ' (' + ago + ')' : '');
+            } else {
+                livenessEl.textContent = 'Huginn: unknown';
             }
         }
 
@@ -758,9 +906,9 @@
             elements.criticalCount.textContent = criticalCount;
         }
 
-        // Monitor uptime
-        if (elements.monitorUptime) {
-            elements.monitorUptime.textContent =
+        // Monitor runtime (duration, not a percentage)
+        if (elements.monitorRuntime) {
+            elements.monitorRuntime.textContent =
                 formatUptime(data.uptime_seconds);
         }
     }
@@ -872,7 +1020,12 @@
         };
         if (data.huginn_data) {
             clone.huginn_data = {
-                uptime_percent: data.huginn_data.uptime_percent
+                uptime_percent: data.huginn_data.uptime_percent,
+                uptime_24h: data.huginn_data.uptime_24h,
+                uptime_30d: data.huginn_data.uptime_30d,
+                timeout_count: data.huginn_data.timeout_count,
+                timeout_count_30d: data.huginn_data.timeout_count_30d,
+                health_state: data.huginn_data.health_state,
             };
         }
         if (data.system_metrics) {

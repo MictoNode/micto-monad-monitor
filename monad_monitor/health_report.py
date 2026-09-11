@@ -204,16 +204,40 @@ class HealthReporter:
                 huginn_data = v_metrics.get("huginn_data")
                 if huginn_data:
                     uptime_percent = huginn_data.get("uptime_percent")
+                    uptime_24h = huginn_data.get("uptime_24h")
+                    uptime_30d = huginn_data.get("uptime_30d")
                     finalized_count = huginn_data.get("finalized_count")
                     timeout_count = huginn_data.get("timeout_count")
+                    timeout_count_30d = huginn_data.get("timeout_count_30d")
                     total_events = huginn_data.get("total_events")
 
+                    # Uptime is windowed: the rolling 24h figure is what an
+                    # operator acts on, the 30d figure is the medium-term
+                    # trend, and the cumulative figure covers Huginn's
+                    # permanent epoch snapshots. Label each window so none is
+                    # mistaken for another, and skip windows Huginn had no
+                    # data for (None) rather than showing a fake 0%.
+                    uptime_parts = []
+                    if uptime_24h is not None:
+                        uptime_parts.append(f"{uptime_24h}% (24h)")
+                    if uptime_30d is not None:
+                        uptime_parts.append(f"{uptime_30d}% (30d)")
                     if uptime_percent is not None:
-                        report_lines.append(f"   📊 Uptime: {uptime_percent}%")
+                        uptime_parts.append(f"{uptime_percent}% (all-time)")
+                    if uptime_parts:
+                        report_lines.append(f"   📊 Uptime: {' | '.join(uptime_parts)}")
+
                     if finalized_count is not None and total_events is not None:
-                        report_lines.append(f"   ✅ Finalized: {finalized_count}/{total_events}")
+                        report_lines.append(
+                            f"   ✅ Finalized: {finalized_count}/{total_events} (all-time)"
+                        )
                     if timeout_count is not None and timeout_count > 0:
-                        report_lines.append(f"   ⏱️ Timeouts: {timeout_count}")
+                        if timeout_count_30d is not None:
+                            report_lines.append(
+                                f"   ⏱️ Timeouts: {timeout_count_30d} (30d) | {timeout_count} (all-time)"
+                            )
+                        else:
+                            report_lines.append(f"   ⏱️ Timeouts: {timeout_count} (all-time)")
 
                     # Last round info
                     last_round = huginn_data.get("last_round")

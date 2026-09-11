@@ -8,22 +8,34 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
   <style>
+    /* ──────────────────────────────────────────────────────
+       Design tokens.
+       TOKEN SYNC: this block is paired with the :root token block in
+       monad_monitor/static/style.css. Keep shared role names and values
+       identical in both files.
+       Intentional hue divergence: the monitor dashboard's --status-warning is
+       pink (#FF8EE4) and its --status-critical is amber (#FFAE45); here the
+       same roles map to amber "warning" and red "critical". Role NAMES are
+       shared across both dashboards; the hues are not - do not recolour either
+       dashboard to match the other.
+    ────────────────────────────────────────────────────── */
     :root {
       --bg-primary: #0E091C;
       --bg-card: #14111F;
       --bg-card-hover: #1A1628;
-      --accent: #836EF9;
-      --accent-muted: rgba(131, 110, 249, 0.15);
+      --monad-purple: #836EF9;
+      --monad-purple-muted: rgba(131, 110, 249, 0.15);
       --text-primary: #F8F7FC;
       --text-secondary: #A8A4B8;
       --text-muted: #6B6880;
       --border: rgba(255, 255, 255, 0.08);
-      --border-solid: #1F1A2E;
+      --border-default: #1F1A2E;
       --radius: 8px;
-      --status-up: #85E6FF;
-      --status-up-bg: rgba(133, 230, 255, 0.1);
-      --status-down: #FF6B6B;
-      --status-down-bg: rgba(255, 107, 107, 0.1);
+      /* Healthy/up role shared with the monitor dashboard. */
+      --status-active: #85E6FF;
+      --status-active-bg: rgba(133, 230, 255, 0.1);
+      --status-critical: #FF6B6B;
+      --status-critical-bg: rgba(255, 107, 107, 0.1);
       --status-warning: #FFAE45;
       --status-warning-bg: rgba(255, 174, 69, 0.1);
     }
@@ -54,7 +66,7 @@
 
     .login-card {
       background: var(--bg-card);
-      border: 1px solid var(--border-solid);
+      border: 1px solid var(--border-default);
       border-radius: 12px;
       padding: 40px;
       width: 100%;
@@ -75,7 +87,7 @@
     .login-card input {
       width: 100%;
       padding: 12px 16px;
-      border: 1px solid var(--border-solid);
+      border: 1px solid var(--border-default);
       border-radius: var(--radius);
       background: var(--bg-primary);
       color: var(--text-primary);
@@ -85,12 +97,12 @@
       transition: border-color 0.2s ease;
     }
 
-    .login-card input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-muted); }
+    .login-card input:focus { border-color: var(--monad-purple); box-shadow: 0 0 0 3px var(--monad-purple-muted); }
 
     .login-card button {
       width: 100%;
       padding: 12px;
-      background: var(--accent);
+      background: var(--monad-purple);
       color: #fff;
       border: none;
       border-radius: var(--radius);
@@ -103,7 +115,7 @@
     .login-card button:hover { opacity: 0.9; }
 
     .login-error {
-      color: var(--status-down);
+      color: var(--status-critical);
       font-size: 13px;
       margin-top: 12px;
       min-height: 20px;
@@ -117,7 +129,7 @@
       align-items: center;
       justify-content: space-between;
       padding: 16px 24px;
-      border-bottom: 1px solid var(--border-solid);
+      border-bottom: 1px solid var(--border-default);
       background: var(--bg-card);
       position: sticky;
       top: 0;
@@ -134,7 +146,7 @@
 
     .header-logout {
       background: none;
-      border: 1px solid var(--border-solid);
+      border: 1px solid var(--border-default);
       color: var(--text-secondary);
       padding: 6px 14px;
       border-radius: var(--radius);
@@ -143,15 +155,15 @@
       transition: border-color 0.2s ease, color 0.2s ease;
     }
 
-    .header-logout:hover { border-color: var(--accent); color: var(--text-primary); }
-    .header-logout:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .header-logout:hover { border-color: var(--monad-purple); color: var(--text-primary); }
+    .header-logout:focus-visible { outline: 2px solid var(--monad-purple); outline-offset: 2px; }
 
     /* ─── Tabs ─── */
     .tabs {
       display: flex;
       gap: 0;
       padding: 0 24px;
-      border-bottom: 1px solid var(--border-solid);
+      border-bottom: 1px solid var(--border-default);
       background: var(--bg-card);
     }
 
@@ -165,24 +177,27 @@
     }
 
     .tab:hover { color: var(--text-primary); }
-    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tab.active { color: var(--monad-purple); border-bottom-color: var(--monad-purple); }
     .tabs.hidden { display: none; }
 
     /* ─── Overview stat bar ─── */
+    /* Nine stat boxes: 9 across on large desktops, then 5 / 3 / 2 columns.
+       minmax(0, 1fr) lets columns shrink instead of overflowing the viewport. */
     .overview {
       display: grid;
-      grid-template-columns: repeat(6, 1fr);
+      grid-template-columns: repeat(9, minmax(0, 1fr));
       gap: 12px;
       padding: 20px 24px;
     }
 
     .stat-box {
       background: var(--bg-card);
-      border: 1px solid var(--border-solid);
+      border: 1px solid var(--border-default);
       border-radius: var(--radius);
       padding: 16px;
       text-align: center;
       transition: background 0.2s ease;
+      min-width: 0;
     }
 
     .stat-box .label {
@@ -191,18 +206,24 @@
       text-transform: uppercase;
       letter-spacing: 0.5px;
       margin-bottom: 6px;
+      overflow-wrap: anywhere;
     }
 
-    .stat-box .value { font-size: 22px; font-weight: 700; }
+    .stat-box .value {
+      font-size: 22px;
+      font-weight: 700;
+      line-height: 1.2;
+      overflow-wrap: anywhere;
+    }
 
-    .stat-box.status-up { background: var(--status-up-bg); border-color: rgba(133, 230, 255, 0.25); }
-    .stat-box.status-up .value { color: var(--status-up); }
-    .stat-box.status-down { background: var(--status-down-bg); border-color: rgba(255, 107, 107, 0.25); }
-    .stat-box.status-down .value { color: var(--status-down); }
+    .stat-box.status-active { background: var(--status-active-bg); border-color: rgba(133, 230, 255, 0.25); }
+    .stat-box.status-active .value { color: var(--status-active); }
+    .stat-box.status-critical { background: var(--status-critical-bg); border-color: rgba(255, 107, 107, 0.25); }
+    .stat-box.status-critical .value { color: var(--status-critical); }
     .stat-box.status-warning { background: var(--status-warning-bg); border-color: rgba(255, 174, 69, 0.25); }
     .stat-box.status-warning .value { color: var(--status-warning); }
-    .stat-box.status-info { background: var(--accent-muted); border-color: rgba(131, 110, 249, 0.25); }
-    .stat-box.status-info .value { color: var(--accent); }
+    .stat-box.status-info { background: var(--monad-purple-muted); border-color: rgba(131, 110, 249, 0.25); }
+    .stat-box.status-info .value { color: var(--monad-purple); }
 
     /* ─── Sections ─── */
     .section { padding: 0 24px; margin-bottom: 8px; }
@@ -214,12 +235,12 @@
       padding: 14px 0;
       cursor: pointer;
       user-select: none;
-      border-bottom: 1px solid var(--border-solid);
+      border-bottom: 1px solid var(--border-default);
       transition: color 0.2s ease;
       flex-wrap: wrap;
     }
 
-    .section-header:hover { color: var(--accent); }
+    .section-header:hover { color: var(--monad-purple); }
 
     .section-arrow {
       font-size: 12px;
@@ -236,10 +257,26 @@
       color: var(--text-primary);
     }
 
+    /* Real button so the collapse control is keyboard reachable. */
+    .section-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: none;
+      border: none;
+      padding: 0;
+      margin: 0;
+      font: inherit;
+      color: inherit;
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .section-toggle:focus-visible { outline: 2px solid var(--monad-purple); outline-offset: 2px; }
+
     .section-count {
       font-size: 12px;
       color: var(--text-secondary);
-      margin-left: 6px;
     }
 
     .section-desc {
@@ -280,7 +317,7 @@
     .chart-card {
       background: var(--bg-card);
       border-radius: var(--radius);
-      border: 1px solid var(--border-solid);
+      border: 1px solid var(--border-default);
       padding: 16px;
       min-height: 280px;
       position: relative;
@@ -325,7 +362,7 @@
       align-items: center;
       justify-content: center;
       background: var(--bg-card);
-      border: 1px solid var(--border-solid);
+      border: 1px solid var(--border-default);
       border-radius: 6px;
       color: var(--text-muted);
       cursor: pointer;
@@ -335,8 +372,8 @@
       transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
     }
 
-    .expand-btn:hover { color: var(--text-primary); border-color: var(--accent); background: var(--accent-muted); }
-    .expand-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .expand-btn:hover { color: var(--text-primary); border-color: var(--monad-purple); background: var(--monad-purple-muted); }
+    .expand-btn:focus-visible { outline: 2px solid var(--monad-purple); outline-offset: 2px; }
 
     @media (max-width: 768px) {
       .expand-btn { width: 40px; height: 40px; top: 8px; right: 8px; }
@@ -371,7 +408,7 @@
       align-items: center;
       justify-content: center;
       background: var(--bg-card);
-      border: 1px solid var(--border-solid);
+      border: 1px solid var(--border-default);
       border-radius: 8px;
       color: var(--text-secondary);
       cursor: pointer;
@@ -381,8 +418,8 @@
       transition: color 0.15s ease, border-color 0.15s ease;
     }
 
-    .fs-close-btn:hover { color: var(--text-primary); border-color: var(--status-down); }
-    .fs-close-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .fs-close-btn:hover { color: var(--text-primary); border-color: var(--status-critical); }
+    .fs-close-btn:focus-visible { outline: 2px solid var(--monad-purple); outline-offset: 2px; }
 
     .fs-body {
       flex: 1;
@@ -423,19 +460,40 @@
       padding: 16px 24px;
       color: var(--text-muted);
       font-size: 12px;
-      border-top: 1px solid var(--border-solid);
+      border-top: 1px solid var(--border-default);
       margin-top: 16px;
       letter-spacing: 0.02em;
     }
 
     /* ─── Responsive ─── */
+    /* Tightest 9-column range (1440-1599px): shrink the type so a counter like
+       12,345,678 stays on one line and "Committed Blocks" does not wrap, which
+       would otherwise misalign the values across the row. */
+    @media (min-width: 1440px) and (max-width: 1599px) {
+      .stat-box { padding: 14px; }
+      .stat-box .label { font-size: 10px; letter-spacing: 0.3px; }
+      .stat-box .value { font-size: 18px; }
+    }
+
+    @media (max-width: 1439px) {
+      .overview { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    }
+
     @media (max-width: 1024px) {
-      .overview { grid-template-columns: repeat(3, 1fr); }
+      .overview { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     }
 
     @media (max-width: 768px) {
-      .overview { grid-template-columns: repeat(2, 1fr); }
+      .overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .section-body { grid-template-columns: 1fr; }
+      .stat-box { padding: 12px; }
+      .stat-box .value { font-size: 18px; }
+    }
+
+    @media (max-width: 480px) {
+      .stat-box { padding: 10px; }
+      .stat-box .value { font-size: 16px; }
+      .stat-box .label { font-size: 10px; letter-spacing: 0.3px; }
     }
 
     /* ─── Range Selector ─── */
@@ -495,6 +553,29 @@
         min-height: 30px;
       }
     }
+    /* ─── Accessibility ─── */
+    :focus-visible {
+      outline: 2px solid var(--monad-purple);
+      outline-offset: 2px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+
+    @media (prefers-contrast: high) {
+      .stat-box,
+      .chart-card {
+        border-width: 2px;
+        border-color: var(--text-muted);
+      }
+    }
   </style>
 </head>
 <body>
@@ -511,7 +592,7 @@
       <p>Nodes Metrics</p>
       <input type="password" id="password-input" placeholder="Enter password" autocomplete="current-password">
       <button id="login-btn" onclick="login()">Sign In</button>
-      <div id="login-error" class="login-error"></div>
+      <div id="login-error" class="login-error" role="status" aria-live="polite"></div>
     </div>
   </div>
 
@@ -534,8 +615,8 @@
         <button class="header-logout" onclick="logout()">Logout</button>
       </div>
     </div>
-    <nav id="validator-tabs" class="tabs"></nav>
-    <section id="overview" class="overview"></section>
+    <nav id="validator-tabs" class="tabs" role="tablist" aria-label="Validators"></nav>
+    <section id="overview" class="overview" role="region" aria-label="Node overview"></section>
     <div id="sections-container"></div>
     <div class="footer">Made by MictoNode</div>
   </div>
@@ -989,9 +1070,18 @@
         count.className = 'section-count';
         count.textContent = '(' + section.charts.length + ')';
 
-        header.appendChild(arrow);
-        header.appendChild(title);
-        header.appendChild(count);
+        // Real button (not a role on the header) so keyboard users can toggle
+        // without nesting the range-selector buttons inside another control.
+        const toggleBtn = document.createElement('button');
+        toggleBtn.type = 'button';
+        toggleBtn.className = 'section-toggle';
+        toggleBtn.setAttribute('aria-expanded', 'false');
+        toggleBtn.setAttribute('aria-controls', 'wrapper-' + section.id);
+        toggleBtn.appendChild(arrow);
+        toggleBtn.appendChild(title);
+        toggleBtn.appendChild(count);
+
+        header.appendChild(toggleBtn);
 
         if (section.desc) {
           const secDesc = document.createElement('span');
@@ -1026,6 +1116,8 @@
         const wrapper = document.createElement('div');
         wrapper.className = 'section-body-wrapper collapsed';
         wrapper.id = 'wrapper-' + section.id;
+        wrapper.setAttribute('aria-hidden', 'true');
+        wrapper.setAttribute('inert', '');
 
         const body = document.createElement('div');
         body.className = 'section-body';
@@ -1079,6 +1171,20 @@
       if (!wrapper || !arrow) return;
       wrapper.classList.toggle('collapsed');
       arrow.classList.toggle('collapsed');
+      const collapsed = wrapper.classList.contains('collapsed');
+      // Keep the visual state and the accessible state in sync; collapsed
+      // content also leaves the tab order so focus cannot land offscreen.
+      if (collapsed) {
+        wrapper.setAttribute('aria-hidden', 'true');
+        wrapper.setAttribute('inert', '');
+      } else {
+        wrapper.removeAttribute('aria-hidden');
+        wrapper.removeAttribute('inert');
+      }
+      const toggleBtn = arrow.closest('.section-toggle');
+      if (toggleBtn) {
+        toggleBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      }
     }
 
     /* ──────────────────────────────────────────────────────
@@ -1476,8 +1582,17 @@
       for (const v of validators) {
         const tab = document.createElement('div');
         tab.className = 'tab' + (v.name === activeValidator ? ' active' : '');
+        tab.setAttribute('role', 'tab');
+        tab.setAttribute('tabindex', '0');
+        tab.setAttribute('aria-selected', v.name === activeValidator ? 'true' : 'false');
         tab.textContent = v.name;
         tab.addEventListener('click', () => selectValidator(v.name));
+        tab.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            selectValidator(v.name);
+          }
+        });
         tabs.appendChild(tab);
       }
     }
@@ -1518,7 +1633,8 @@
         {
           label: 'Node Status',
           value: m.node_status === 1 ? 'UP' : m.node_status === 0 ? 'DOWN' : 'N/A',
-          cls: m.node_status === 1 ? 'status-up' : m.node_status === 0 ? 'status-down' : ''
+          cls: m.node_status === 1 ? 'status-active' : m.node_status === 0 ? 'status-critical' : '',
+          live: true
         },
         {
           label: 'Block Height',
@@ -1528,7 +1644,7 @@
         {
           label: 'Sync Status',
           value: m.syncing === 0 ? 'SYNCED' : m.syncing === 1 ? 'SYNCING' : 'N/A',
-          cls: m.syncing === 0 ? 'status-up' : m.syncing === 1 ? 'status-warning' : ''
+          cls: m.syncing === 0 ? 'status-active' : m.syncing === 1 ? 'status-warning' : ''
         },
         {
           label: 'Self Stake',
@@ -1539,14 +1655,31 @@
           label: 'Total Peers',
           value: formatNum(m.peers),
           cls: m.peers != null
-            ? (m.peers >= 50 ? 'status-up'
+            ? (m.peers >= 50 ? 'status-active'
               : m.peers >= 20 ? 'status-warning'
-              : 'status-down')
+              : 'status-critical')
             : ''
         },
         {
-          label: 'Uptime',
+          // Duration since process start -> "Runtime". Percentage metrics keep
+          // the word "Uptime".
+          label: 'Node Runtime',
           value: formatDuration(m.uptime_us),
+          cls: 'status-info'
+        },
+        {
+          label: 'Proposals',
+          value: formatNum(m.proposals),
+          cls: 'status-info'
+        },
+        {
+          label: 'Committed Blocks',
+          value: formatNum(m.commits),
+          cls: 'status-info'
+        },
+        {
+          label: 'Local Timeouts',
+          value: formatNum(m.local_timeouts),
           cls: 'status-info'
         }
       ];
@@ -1554,6 +1687,11 @@
       stats.forEach(s => {
         const box = document.createElement('div');
         box.className = 'stat-box' + (s.cls ? ' ' + s.cls : '');
+        if (s.live) {
+          // Node status changes are status text, not decoration: announce them.
+          box.setAttribute('role', 'status');
+          box.setAttribute('aria-live', 'polite');
+        }
 
         const lbl = document.createElement('div');
         lbl.className = 'label';

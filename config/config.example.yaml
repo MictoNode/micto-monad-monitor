@@ -28,6 +28,7 @@ monitoring:
   check_interval: 60           # Check interval per validator (seconds)
   alert_threshold: 3           # Consecutive failures before alert
   huginn_timeout_alert_threshold: 3 # Min network-visible missed rounds (Huginn) per check window before CRITICAL alert
+  validator_set_warning: true  # WARN when a validator is set to leave the active set next epoch (Telegram/Discord/Slack)
   ts_validation_fail_threshold: 10 # Consecutive ts_validation_fail increases before WARNING (network-wide issue)
   extended_report_interval: 21600 # Extended report with block metrics (6 hours)
   timeout: 10                  # HTTP timeout (seconds)

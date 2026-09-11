@@ -86,6 +86,11 @@ def load_config() -> Dict[str, Any]:
         "SLACK_WEBHOOK_URL", config["slack"].get("webhook_url", "")
     )
 
+    # Monitoring defaults (next-epoch active set exit warning is opt-out)
+    if "monitoring" not in config:
+        config["monitoring"] = {}
+    config["monitoring"].setdefault("validator_set_warning", True)
+
     return config
 
 
@@ -126,6 +131,13 @@ def validate_config(config: Dict[str, Any]) -> None:
     ):
         errors.append(
             f"huginn_timeout_alert_threshold ({timeout_alert_threshold}) must be an integer >= 1"
+        )
+
+    # Next-epoch active set exit warning toggle (M4)
+    validator_set_warning = monitoring.get("validator_set_warning", True)
+    if not isinstance(validator_set_warning, bool):
+        errors.append(
+            f"validator_set_warning ({validator_set_warning}) must be a boolean"
         )
 
     # Check thresholds

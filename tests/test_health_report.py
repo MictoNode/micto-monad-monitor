@@ -343,3 +343,144 @@ class TestHealthReporterExtendedReport:
             body_str = str(request_body)
             # Should show Inactive status
             assert "Inactive" in body_str or "inactive" in body_str.lower()
+
+    def test_extended_report_labels_uptime_windows(
+        self, reporter, sample_validators, sample_states
+    ):
+        """Rolling 24h, 30d and cumulative uptime are reported with their window"""
+        metrics_data = {
+            "validator-1": {
+                "is_active_validator": True,
+                "huginn_data": {
+                    "uptime_percent": 99.96,
+                    "uptime_24h": 100.0,
+                    "uptime_30d": 99.9,
+                    "finalized_count": 145409,
+                    "timeout_count": 57,
+                    "timeout_count_30d": 12,
+                    "total_events": 145466,
+                },
+            }
+        }
+
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.POST,
+                "https://api.telegram.org/bottest-token/sendMessage",
+                json={"ok": True},
+                status=200,
+            )
+            reporter.last_extended_report_time = time.time() - 2
+
+            reporter.maybe_send_extended_report(
+                sample_validators, sample_states, metrics_data
+            )
+
+            body_str = str(rsps.calls[0].request.body)
+            assert "Uptime: 100.0% (24h) | 99.9% (30d) | 99.96% (all-time)" in body_str
+            assert "Finalized: 145409/145466 (all-time)" in body_str
+            assert "Timeouts: 12 (30d) | 57 (all-time)" in body_str
+
+    def test_extended_report_falls_back_to_all_time_uptime(
+        self, reporter, sample_validators, sample_states
+    ):
+        """Without the /health merge only the cumulative uptime is reported"""
+        metrics_data = {
+            "validator-1": {
+                "is_active_validator": True,
+                "huginn_data": {
+                    "uptime_percent": 99.5,
+                    "finalized_count": 10,
+                    "timeout_count": 1,
+                    "total_events": 11,
+                },
+            }
+        }
+
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.POST,
+                "https://api.telegram.org/bottest-token/sendMessage",
+                json={"ok": True},
+                status=200,
+            )
+            reporter.last_extended_report_time = time.time() - 2
+
+            reporter.maybe_send_extended_report(
+                sample_validators, sample_states, metrics_data
+            )
+
+            body_str = str(rsps.calls[0].request.body)
+            assert "Uptime: 99.5% (all-time)" in body_str
+            assert "(24h)" not in body_str
+
+    def test_extended_report_uptime_30d_window_missing(
+        self, reporter, sample_validators, sample_states
+    ):
+        """A 30d window that was never fetched is omitted from the line"""
+        metrics_data = {
+            "validator-1": {
+                "is_active_validator": True,
+                "huginn_data": {
+                    "uptime_percent": 99.96,
+                    "uptime_24h": 100.0,
+                    "finalized_count": 145409,
+                    "timeout_count": 57,
+                    "total_events": 145466,
+                },
+            }
+        }
+
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.POST,
+                "https://api.telegram.org/bottest-token/sendMessage",
+                json={"ok": True},
+                status=200,
+            )
+            reporter.last_extended_report_time = time.time() - 2
+
+            reporter.maybe_send_extended_report(
+                sample_validators, sample_states, metrics_data
+            )
+
+            body_str = str(rsps.calls[0].request.body)
+            assert "Uptime: 100.0% (24h) | 99.96% (all-time)" in body_str
+            assert "(30d)" not in body_str
+            # No 30d timeout counter either -> cumulative-only form
+            assert "Timeouts: 57 (all-time)" in body_str
+
+    def test_extended_report_uptime_30d_no_events(
+        self, reporter, sample_validators, sample_states
+    ):
+        """A 30d window with no events (None, 0 events) is omitted, not shown as 0%"""
+        metrics_data = {
+            "validator-1": {
+                "is_active_validator": True,
+                "huginn_data": {
+                    "uptime_percent": 99.96,
+                    "uptime_24h": 100.0,
+                    "uptime_30d": None,
+                    "finalized_count_30d": 0,
+                    "timeout_count_30d": None,
+                    "total_events_30d": 0,
+                },
+            }
+        }
+
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.POST,
+                "https://api.telegram.org/bottest-token/sendMessage",
+                json={"ok": True},
+                status=200,
+            )
+            reporter.last_extended_report_time = time.time() - 2
+
+            reporter.maybe_send_extended_report(
+                sample_validators, sample_states, metrics_data
+            )
+
+            body_str = str(rsps.calls[0].request.body)
+            assert "Uptime: 100.0% (24h) | 99.96% (all-time)" in body_str
+            assert "(30d)" not in body_str
