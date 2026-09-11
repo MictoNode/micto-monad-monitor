@@ -340,6 +340,10 @@ def create_app(password: str, jwt_secret: str, prometheus_url: str, validators_c
         response = await call_next(request)
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
+        elif response.headers.get("content-type", "").startswith("text/html"):
+            # The dashboard page ships the whole UI inline (styles + logic), so
+            # an edge cache pinning an old copy would show a release-old design.
+            response.headers["Cache-Control"] = "no-cache"
         return response
 
     def _get_current_user(request: Request) -> dict:

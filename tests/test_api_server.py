@@ -364,6 +364,18 @@ class TestRangeCache:
         h = client.get("/api/health")
         assert h.headers.get("cache-control") == "no-store"
 
+    def test_dashboard_html_revalidates(self):
+        """The dashboard page carries the whole UI inline, so it must not be
+        pinned by an edge cache after a release."""
+        from fastapi.testclient import TestClient
+        from monad_monitor.api_server import create_app
+        app = create_app(password="testpass", jwt_secret="secret", prometheus_url="http://localhost:9090", validators_config=[])
+        client = TestClient(app)
+        r = client.get("/dashboard/")
+        assert r.status_code == 200
+        assert r.headers.get("content-type", "").startswith("text/html")
+        assert r.headers.get("cache-control") == "no-cache"
+
 
 class _FakeResponse:
     def __init__(self, data):
