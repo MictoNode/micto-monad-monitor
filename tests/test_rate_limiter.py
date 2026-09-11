@@ -43,16 +43,20 @@ class TestTokenBucketRateLimiter:
         assert limiter.tokens == 0
         assert limiter.can_consume() is False
 
-    def test_refill_over_time(self):
-        """Test that tokens refill over time"""
+    def test_refill_over_time(self, monkeypatch):
+        """Tokens refill at refill_rate per second (fake clock, no wall-clock flake)"""
+        import monad_monitor.rate_limiter as rate_limiter
+
+        now = [1_000_000.0]
+        monkeypatch.setattr(rate_limiter.time, "time", lambda: now[0])
+
         limiter = TokenBucketRateLimiter(max_tokens=10, refill_rate=10.0)  # 10 tokens/sec
         limiter.consume(10)  # Empty the bucket
         assert limiter.tokens == 0
 
-        # Wait 0.5 seconds - should have ~5 tokens
-        time.sleep(0.5)
+        now[0] += 0.5  # Half a second later -> 5 tokens
         limiter._refill()
-        assert 4 <= limiter.tokens <= 6  # Allow for timing variance
+        assert limiter.tokens == 5.0
 
     def test_refill_does_not_exceed_max(self):
         """Test that refill doesn't exceed max tokens"""
