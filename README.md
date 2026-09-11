@@ -708,6 +708,28 @@ After updating, compare your local config files (`config/config.yaml`, `config/v
 
 > **Note:** When building from source, the new-version notification uses `MONITOR_VERSION`, which defaults to `0.0.0`. Unless you bake your real version in (e.g. `docker compose build --build-arg MONITOR_VERSION=1.4.9`), any published release will be reported as new. Pre-built GHCR images already carry the correct version.
 
+#### Monad v0.16.2+ — Metrics Port Migration (informational)
+
+Monad is moving validator metrics from **push** (an OTEL collector re-exposing everything on `:8889`) to **pull**:
+
+- Since **v0.16.2** the node process itself publishes its metrics on **`:9143/metrics`** — the collector is no longer needed on the node side.
+- Monad Foundation will scrape your endpoint directly once the migration completes; `:8889` (OTEL collector) will be retired.
+- **You do not have to change anything yet.** Keep pushing metrics to MF as you do today, and keep `metrics_port: 8889` until MF announces the cut-over.
+
+**When you switch**, point the validator's `metrics_port` at `9143` in `validators.yaml` and let the monitor pick it up (Prometheus targets are regenerated on the next check cycle):
+
+```yaml
+validators:
+  - name: "Monad Testnet #1"
+    metrics_port: 9143      # node-published metrics (Monad >= 0.16.2)
+```
+
+**Coverage caveat (verified against a live v0.16.2 testnet node):** `:9143` serves every metric family the monitor charts **except `monad_rpc_*`** — the RPC section is served by the separate `monad-rpc` service, which the OTEL collector used to aggregate. Until RPC coverage on the new endpoint is confirmed, keep scraping `:8889` for the RPC charts (or check whether `monad-rpc` exposes its own metrics port). Otherwise those 5 charts report "no data".
+
+**Firewall:** keep `:8889` and `:9143` reachable **only from your monitor server** — metrics have no reason to be public. When MF switches to pull, add MF's scraper IPs as well.
+
+**What does *not* change:** the TrieDB + NVMe SMART collector script (`scripts/triedb-collector.sh` → node_exporter text-file metrics on `:9100`) stays in use. The native `monad_triedb_*` metrics do **not** replace the fast/slow/free tier breakdown, the history retention figures, or NVMe wear level / temperature. The monitor likewise gains a new native signal — `monad_triedb_migration_phase` (`0` legacy, `1` dual-timeline, `2` page-encoded) — which is not used by any alert yet.
+
 ### Version-Specific Steps
 
 #### v1.3.0 → v1.4.0

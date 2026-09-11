@@ -1,11 +1,16 @@
 # Monad Validator Monitor - Validator List
 # Each validator can have different port configurations
+#
+# Metrics port note (Monad v0.16.2+): the OTEL collector on 8889 is being
+# retired in favour of metrics published by the node itself on 9143. Keep 8889
+# until Monad Foundation announces the cut-over, then switch metrics_port to
+# 9143 (see "Metrics Port Migration" in the README for the RPC caveat).
 
 validators:
   - name: "Monad Testnet #1"
     host: "192.168.1.100"           # Validator IP
     network: "testnet"              # Network: "testnet" or "mainnet" (for Huginn API)
-    metrics_port: 8889              # Prometheus metrics port
+    metrics_port: 8889              # Prometheus metrics port (9143 on Monad >= 0.16.2)
     rpc_port: 8080                  # JSON-RPC port
     node_exporter_port: 9100        # Node exporter (optional)
     validator_secp: "02abc123def456..."  # REQUIRED: secp256k1 public key (66 chars, starts with 02/03)

@@ -637,6 +637,17 @@
     let activeValidator = null;
     let charts = {};          // canvasId -> Chart instance
     let chartSeq = {};        // canvasId -> latest update generation (race guard)
+    // canvasId -> 'waiting' | 'empty' | 'data'. 'empty' means a fetch COMPLETED
+    // and returned nothing, which is what a node looks like when it does not
+    // export a metric (e.g. after moving the scrape to another metrics port);
+    // distinguishing it from 'waiting' stops a port/metric change from looking
+    // like a hung dashboard.
+    const chartDataState = {};
+    const NO_DATA_TEXT = {
+      waiting: 'Waiting for data…',
+      empty: 'No data in this range — verify the node exports this metric on its metrics port',
+      error: 'Could not load data — check the Prometheus / API connection'
+    };
     let countdownInterval = null;
     let countdown = REFRESH_INTERVAL;
     let isHidden = false;
@@ -1306,7 +1317,8 @@
         section.charts.forEach(def => {
           const canvas = document.getElementById('chart-' + def.id);
           if (!canvas) return;
-          showChartNoData(def.id, true);
+          chartDataState[def.id] = 'waiting';
+          showChartNoData(def.id, true, 'waiting');
           charts[def.id] = new Chart(canvas.getContext('2d'), {
             type: 'line',
             data: {
@@ -1319,7 +1331,7 @@
       });
     }
 
-    function showChartNoData(chartId, show) {
+    function showChartNoData(chartId, show, state) {
       const canvas = document.getElementById('chart-' + chartId);
       if (!canvas) return;
       const card = canvas.closest('.chart-card');
@@ -1327,12 +1339,13 @@
       let nd = card.querySelector('.no-data');
       if (show) {
         canvas.style.display = 'none';
+        const text = NO_DATA_TEXT[state] || NO_DATA_TEXT.waiting;
         if (!nd) {
           nd = document.createElement('div');
           nd.className = 'no-data';
-          nd.textContent = 'Waiting for data…';
           card.appendChild(nd);
         }
+        nd.textContent = text;
       } else {
         canvas.style.display = '';
         if (nd) nd.remove();
@@ -1468,7 +1481,7 @@
       if (!hasData) {
         const nd = document.createElement('div');
         nd.className = 'fs-no-data';
-        nd.textContent = 'Waiting for data…';
+        nd.textContent = NO_DATA_TEXT[chartDataState[def.id]] || NO_DATA_TEXT.waiting;
         body.appendChild(nd);
       } else {
         const wrap = document.createElement('div');
@@ -1753,17 +1766,18 @@
         apiFetch('/api/chart/' + enc + '/' + key + '?range=' + (range || '1h'))
           .then(r => r.json())
           .then(d => d.series || [])
-          .catch(() => [])
+          .catch(() => null)
       );
 
       const allSeries = await Promise.all(fetches);
       if (chartSeq[def.id] !== mySeq) return;
+      const allFailed = allSeries.every(s => s === null);
 
       // Each dataset carries its own timestamps ({x, y}), so series align by
       // real time even when metrics have different data coverage.
       let hasAnyData = false;
       allSeries.forEach((seriesList, i) => {
-        if (i < chart.data.datasets.length) {
+        if (i < chart.data.datasets.length && seriesList) {
           chart.data.datasets[i].data = seriesList.length > 0
             ? seriesList[0].values.map(p => ({
                 x: p[0] * 1000,
@@ -1774,7 +1788,8 @@
         }
       });
 
-      showChartNoData(def.id, !hasAnyData);
+      chartDataState[def.id] = hasAnyData ? 'data' : (allFailed ? 'error' : 'empty');
+      showChartNoData(def.id, !hasAnyData, chartDataState[def.id]);
       chart.update('none');
     }
 
@@ -1785,11 +1800,12 @@
         apiFetch('/api/chart/' + enc + '/' + key + '?range=' + (range || '1h'))
           .then(r => r.json())
           .then(d => d.series || [])
-          .catch(() => [])
+          .catch(() => null)
       );
 
       const allSeries = await Promise.all(fetches);
       if (chartSeq[def.id] !== mySeq) return;
+      const allFailed = allSeries.every(s => s === null);
 
       // Build datasets dynamically
       const newDatasets = [];
@@ -1853,7 +1869,8 @@
       });
 
       const hasAnyData = newDatasets.some(ds => ds.data.length > 0);
-      showChartNoData(def.id, !hasAnyData);
+      chartDataState[def.id] = hasAnyData ? 'data' : (allFailed ? 'error' : 'empty');
+      showChartNoData(def.id, !hasAnyData, chartDataState[def.id]);
       chart.data.datasets = newDatasets;
       chart.update('none');
     }
