@@ -576,6 +576,11 @@ body {
     min-width: 0;
 }
 
+/* The TrieDB gauge is optional; without node_exporter data it stays hidden. */
+.resource-gauge[hidden] {
+    display: none;
+}
+
 .gauge-header {
     display: flex;
     justify-content: space-between;
@@ -604,10 +609,6 @@ body {
     background: var(--border-default);
     border-radius: 2px;
     overflow: hidden;
-}
-
-.gauge-bar--wide {
-    height: 4px;
 }
 
 .gauge-fill {
@@ -707,14 +708,6 @@ body {
     font-size: 0.8125rem;
     font-weight: 500;
     color: var(--text-secondary);
-}
-
-.detail-triedb {
-    margin-top: var(--space-3);
-}
-
-.detail-triedb[hidden] {
-    display: none;
 }
 
 .detail-warnings {

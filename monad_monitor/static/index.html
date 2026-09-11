@@ -135,6 +135,15 @@
                     </div>
                     <div class="gauge-bar"><div class="gauge-fill"></div></div>
                 </div>
+                <!-- Optional fourth gauge: only shown when the node exports
+                     TrieDB usage (node_exporter textfile collector). -->
+                <div class="resource-gauge" data-resource="triedb" hidden>
+                    <div class="gauge-header">
+                        <span class="gauge-label">TrieDB</span>
+                        <span class="gauge-value triedb-value">--</span>
+                    </div>
+                    <div class="gauge-bar"><div class="gauge-fill triedb-fill"></div></div>
+                </div>
             </div>
 
             <div class="card-details">
@@ -180,13 +189,6 @@
                         <span class="detail-label">TPS</span>
                         <span class="detail-value detail-tps">--</span>
                     </div>
-                </div>
-                <div class="detail-triedb" hidden>
-                    <div class="gauge-header">
-                        <span class="gauge-label">TrieDB</span>
-                        <span class="gauge-value detail-triedb-value">--</span>
-                    </div>
-                    <div class="gauge-bar gauge-bar--wide"><div class="gauge-fill detail-triedb-fill"></div></div>
                 </div>
                 <div class="detail-warnings" hidden>
                     <span class="detail-label">Alerts</span>

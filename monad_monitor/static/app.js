@@ -608,16 +608,16 @@
         setTextSafe(card, '.detail-tps',
             data.network_tps != null ? formatTps(data.network_tps) : '--');
 
-        // TrieDB gauge
-        var triedbContainer = card.querySelector('.detail-triedb');
+        // TrieDB gauge (optional fourth gauge in the resource row)
+        var triedbContainer = card.querySelector('.resource-gauge[data-resource="triedb"]');
         if (triedbContainer) {
             var triedbPercent = systemMetrics
                 ? systemMetrics.triedb_used_percent : null;
             if (triedbPercent !== null && triedbPercent !== undefined) {
                 triedbContainer.removeAttribute('hidden');
-                setTextSafe(card, '.detail-triedb-value',
+                setTextSafe(card, '.triedb-value',
                     Math.round(triedbPercent) + '%');
-                var triedbFill = card.querySelector('.detail-triedb-fill');
+                var triedbFill = card.querySelector('.triedb-fill');
                 if (triedbFill) {
                     triedbFill.style.width =
                         Math.max(0, Math.min(GAUGE_MAX, triedbPercent)) + '%';
