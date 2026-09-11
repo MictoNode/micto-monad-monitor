@@ -1,6 +1,6 @@
 # Monad Validator Monitor
 
-[![Version](https://img.shields.io/badge/version-1.6.0-8B5CF6?style=flat-square)](https://github.com/MictoNode/micto-monad-monitor)
+[![Version](https://img.shields.io/badge/version-1.7.0-8B5CF6?style=flat-square)](https://github.com/MictoNode/micto-monad-monitor)
 [![Python](https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docker.com)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
@@ -728,7 +728,7 @@ validators:
 
 **Firewall:** keep `:8889` and `:9143` reachable **only from your monitor server** — metrics have no reason to be public. When MF switches to pull, add MF's scraper IPs as well.
 
-**What does *not* change:** the TrieDB + NVMe SMART collector script (`scripts/triedb-collector.sh` → node_exporter text-file metrics on `:9100`) stays in use. The native `monad_triedb_*` metrics do **not** replace the fast/slow/free tier breakdown, the history retention figures, or NVMe wear level / temperature. The monitor likewise gains a new native signal — `monad_triedb_migration_phase` (`0` legacy, `1` dual-timeline, `2` page-encoded) — which is not used by any alert yet.
+**What does *not* change:** the TrieDB + NVMe SMART collector script (`scripts/triedb-collector.sh` → node_exporter text-file metrics on `:9100`) stays in use. The native `monad_triedb_*` metrics do **not** replace the fast/slow/free tier breakdown, the history retention figures, or NVMe wear level / temperature.
 
 ### Version-Specific Steps
 
