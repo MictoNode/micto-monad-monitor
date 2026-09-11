@@ -12,6 +12,8 @@ from typing import Dict, Any, Optional
 
 from aiohttp import web
 
+from .version_check import detect_version
+
 
 class DashboardServer:
     """
@@ -43,7 +45,7 @@ class DashboardServer:
         self._validators_data: Dict[str, Dict[str, Any]] = {}
         self._monitor_status: str = "unknown"
         self._uptime_seconds: float = 0.0
-        self._version: str = "1.0.0"
+        self._version: str = detect_version()
         self._lock = threading.Lock()
 
         # Path to static files

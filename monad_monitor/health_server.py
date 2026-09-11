@@ -7,8 +7,7 @@ from dataclasses import dataclass, field
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Dict, Any, Optional
 
-
-VERSION = "1.0.0"
+from .version_check import detect_version
 
 
 @dataclass
@@ -17,7 +16,7 @@ class HealthStatus:
     status: str = "unknown"  # "healthy", "unhealthy", "unknown"
     uptime_seconds: float = 0.0
     validators: Dict[str, Dict[str, Any]] = field(default_factory=dict)
-    version: str = VERSION
+    version: str = field(default_factory=detect_version)
     started_at: float = field(default_factory=time.time)
 
     def to_dict(self) -> Dict[str, Any]:

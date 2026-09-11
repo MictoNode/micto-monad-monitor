@@ -19,7 +19,16 @@ class TestHealthStatus:
         assert status.status == "unknown"
         assert status.uptime_seconds == 0
         assert status.validators == {}
-        assert status.version == "1.0.0"
+
+    def test_version_follows_monitor_version_env(self, monkeypatch):
+        """Reported version is the one baked into the image"""
+        monkeypatch.setenv("MONITOR_VERSION", "9.9.9")
+        assert HealthStatus().version == "9.9.9"
+
+    def test_version_defaults_for_source_builds(self, monkeypatch):
+        """Without MONITOR_VERSION the documented default is reported"""
+        monkeypatch.delenv("MONITOR_VERSION", raising=False)
+        assert HealthStatus().version == "0.0.0"
 
     def test_health_status_to_dict(self):
         """Test converting health status to dict"""

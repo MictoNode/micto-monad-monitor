@@ -18,6 +18,17 @@ DEFAULT_CHECK_INTERVAL = 7 * 24 * 3600  # Weekly
 DEFAULT_CURRENT_VERSION = "0.0.0"
 
 
+def detect_version() -> str:
+    """Version this monitor believes it runs.
+
+    MONITOR_VERSION is baked into the image at build time (docker.yml passes the
+    release tag), so the /health endpoints and the update checker all report the
+    same thing. Source builds fall back to DEFAULT_CURRENT_VERSION and are then
+    reported as outdated, which is the documented behaviour.
+    """
+    return os.getenv("MONITOR_VERSION", DEFAULT_CURRENT_VERSION)
+
+
 def normalize_version(version: str) -> Optional[Tuple[int, int, int]]:
     """Parse 'v1.4.9' or '1.4.9' into a comparable tuple.
 
@@ -95,7 +106,7 @@ class VersionChecker:
         self.check_interval = check_interval
         self.state_file = state_file
         self.alerts = alerts
-        self.current_version = current_version or os.getenv("MONITOR_VERSION", DEFAULT_CURRENT_VERSION)
+        self.current_version = current_version or detect_version()
         self._last_check = 0.0
         self._last_notified: Optional[str] = None
 
