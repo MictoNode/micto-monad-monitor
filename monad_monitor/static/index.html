@@ -197,13 +197,23 @@
             </div>
 
             <div class="card-footer">
-                <span class="last-check-label">Last check:</span>
-                <span class="last-check-time"></span>
-                <!-- Huginn liveness: label/value pair mirroring "Last check"
-                     above, announced politely so a state change is never
-                     carried by colour alone. -->
-                <span class="last-check-label huginn-liveness-label">Huginn:</span>
-                <span class="huginn-liveness" role="status" aria-live="polite"></span>
+                <span class="footer-item">
+                    <span class="last-check-label">Last check:</span>
+                    <span class="last-check-time"></span>
+                </span>
+                <!-- gmonads sits between the two, in the same label/value
+                     language; hidden when gmonads has never answered
+                     (disabled, or no successful fetch yet). -->
+                <span class="footer-item footer-item--gmonads" hidden>
+                    <span class="last-check-label">gmonads:</span>
+                    <span class="gmonads-liveness" role="status" aria-live="polite"></span>
+                </span>
+                <!-- Huginn liveness; announced politely so a state change is
+                     never carried by colour alone. -->
+                <span class="footer-item footer-item--huginn">
+                    <span class="last-check-label">Huginn:</span>
+                    <span class="huginn-liveness" role="status" aria-live="polite"></span>
+                </span>
             </div>
         </div>
     </template>

@@ -693,16 +693,22 @@ def main():
             if gmonads_client:
                 networks_seen = {v.network for v in validators if v.network}
                 network_tps = {}
+                network_tps_fetched_at = {}
                 for net in networks_seen:
                     try:
                         block_metrics = gmonads_client.get_block_metrics_1m(network=net)
                         if block_metrics is not None:
                             network_tps[net] = block_metrics.avg_tps
+                            # The client serves its cache when the API errors, so
+                            # the age of this timestamp is the gmonads
+                            # reachability signal shown in the card footer.
+                            network_tps_fetched_at[net] = block_metrics.fetched_at
                     except Exception as e:
                         debug(f"Failed to fetch TPS for {net}: {e}")
                 # Attach TPS to each validator based on their network
                 for vname, vdata in health_server_validators.items():
                     vdata["network_tps"] = network_tps.get(vdata.get("network"))
+                    vdata["network_tps_fetched_at"] = network_tps_fetched_at.get(vdata.get("network"))
 
             # Update dashboard server with validator data
             if dashboard_server:

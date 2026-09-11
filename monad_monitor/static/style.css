@@ -741,6 +741,7 @@ body {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
+    justify-content: space-between;
     gap: var(--space-1);
     row-gap: var(--space-1);
     margin-top: var(--space-3);
@@ -758,20 +759,26 @@ body {
     color: var(--text-secondary);
 }
 
-/* Huginn liveness mirrors the "Last check" label/value pair; state is also
-   written as text so the stale treatment is never colour-only. */
-.huginn-liveness-label {
-    font-family: var(--font-mono);
-    font-size: 0.6875rem;
-    color: var(--text-muted);
-    margin-left: auto;
+/* Footer status pairs stay atomic when the footer wraps - a label never
+   splits from its value. The footer itself spreads them with space-between:
+   one line on a wide card, a tidy left-aligned wrap on a narrow one. */
+.footer-item {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    white-space: nowrap;
 }
 
-.huginn-liveness {
+.huginn-liveness,
+.gmonads-liveness {
     font-family: var(--font-mono);
     font-size: 0.6875rem;
     color: var(--text-secondary);
     white-space: nowrap;
+}
+
+.gmonads-liveness.is-stale {
+    color: var(--status-inactive);
 }
 
 /* ============================================
@@ -1277,6 +1284,12 @@ body {
 
     .details-grid {
         grid-template-columns: repeat(2, 1fr);
+    }
+
+    /* Narrow cards: flow the status pairs from the left instead of spreading
+       a single wrapped pair across the line. */
+    .card-footer {
+        justify-content: flex-start;
     }
 }
 

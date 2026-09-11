@@ -23,6 +23,10 @@
     const GAUGE_WARNING_MIN = 70;
     const GAUGE_CRITICAL_MIN = 90;
     const GAUGE_MAX = 100;
+    // gmonads serves cached metrics when its API fails, so an age beyond this
+    // means the third-party source is unreachable (mirrors the monitor's own
+    // 300s freshness threshold for Huginn).
+    const GMONADS_STALE_SECONDS = 300;
     const CARD_STAGGER_DELAY_SEC = 0.08;
     const SECONDS_PER_MINUTE = 60;
     const SECONDS_PER_HOUR = 3600;
@@ -834,6 +838,24 @@
         var lastCheckEl = card.querySelector('.last-check-time');
         if (lastCheckEl && data.last_check) {
             lastCheckEl.textContent = formatTimeAgo(data.last_check);
+        }
+
+        // gmonads liveness: age of the TPS fetch. The client serves its cache
+        // when the API errors, so an old age means gmonads is unreachable.
+        var gmonadsItem = card.querySelector('.footer-item--gmonads');
+        if (gmonadsItem) {
+            var gmonadsEl = gmonadsItem.querySelector('.gmonads-liveness');
+            var tpsFetchedAt = data.network_tps_fetched_at;
+            if (typeof tpsFetchedAt === 'number' && !isNaN(tpsFetchedAt)) {
+                var tpsAge = Math.max(0, Date.now() / 1000 - tpsFetchedAt);
+                var tpsStale = tpsAge > GMONADS_STALE_SECONDS;
+                gmonadsEl.textContent = (tpsStale ? 'stale' : 'ok') +
+                    ' · ' + formatSecondsAgo(tpsAge);
+                gmonadsEl.classList.toggle('is-stale', tpsStale);
+                gmonadsItem.removeAttribute('hidden');
+            } else {
+                gmonadsItem.setAttribute('hidden', '');
+            }
         }
 
         // Populate detail section
