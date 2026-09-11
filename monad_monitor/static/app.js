@@ -376,7 +376,7 @@
             flashElement(card.querySelector('.metric-uptime'));
         }
 
-        // Uptime window chips flash when their own window value changes.
+        // Uptime window values flash when their own window changes.
         var oldHuginn = prev ? prev.huginn_data : null;
         var newHuginn = curr.huginn_data;
         if (oldHuginn && newHuginn) {
@@ -384,8 +384,7 @@
                 ['uptime_24h', '.window-uptime-24h'],
                 ['uptime_30d', '.window-uptime-30d'],
                 ['uptime_percent', '.window-uptime-all'],
-                ['timeout_count_30d', '.window-timeouts-30d'],
-                ['timeout_count', '.window-timeouts-all'],
+                ['timeout_count_30d', '.detail-timeouts-30d'],
             ].forEach(function(pair) {
                 var key = pair[0];
                 var oldVal = oldHuginn[key];
@@ -597,6 +596,8 @@
             huginn ? formatNumber(huginn.finalized_count) : '--');
         setTextSafe(card, '.detail-timeouts',
             huginn ? formatNumber(huginn.timeout_count) : '--');
+        setTextSafe(card, '.detail-timeouts-30d',
+            huginn ? formatCountOrDash(huginn.timeout_count_30d) : '--');
 
         // RPC health
         setTextSafe(card, '.detail-rpc',
@@ -788,17 +789,13 @@
             }
         }
 
-        // Always-visible window chips; a missing window renders as '--'.
+        // Always-visible uptime windows; a missing window renders as '--'.
         setTextSafe(card, '.window-uptime-24h',
             formatUptimeWindow(huginn && huginn.uptime_24h));
         setTextSafe(card, '.window-uptime-30d',
             formatUptimeWindow(huginn && huginn.uptime_30d));
         setTextSafe(card, '.window-uptime-all',
             formatUptimeWindow(huginn && huginn.uptime_percent));
-        setTextSafe(card, '.window-timeouts-30d',
-            formatCountOrDash(huginn && huginn.timeout_count_30d));
-        setTextSafe(card, '.window-timeouts-all',
-            formatCountOrDash(huginn && huginn.timeout_count));
 
         // Huginn liveness + stale treatment (reuses muted/inactive tokens).
         var huginnState = huginn ? huginn.health_state : null;
@@ -808,10 +805,10 @@
         if (livenessEl) {
             if (huginnState) {
                 var ago = formatSecondsAgo(huginn.seconds_since_last_event);
-                livenessEl.textContent = 'Huginn: ' + healthStateText(huginnState) +
-                    (ago ? ' (' + ago + ')' : '');
+                livenessEl.textContent = healthStateText(huginnState) +
+                    (ago ? ' · ' + ago : '');
             } else {
-                livenessEl.textContent = 'Huginn: unknown';
+                livenessEl.textContent = 'unknown';
             }
         }
 

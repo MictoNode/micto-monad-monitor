@@ -142,29 +142,17 @@
                      disclosure: the title tooltip on .metric-uptime is now
                      extra detail, never the only source. -->
                 <div class="uptime-windows" role="group" aria-label="Uptime windows">
-                    <div class="uptime-window-row">
-                        <span class="uptime-chip">
-                            <span class="uptime-chip-label">24h</span>
-                            <span class="uptime-chip-value window-uptime-24h">--</span>
-                        </span>
-                        <span class="uptime-chip">
-                            <span class="uptime-chip-label">30d</span>
-                            <span class="uptime-chip-value window-uptime-30d">--</span>
-                        </span>
-                        <span class="uptime-chip">
-                            <span class="uptime-chip-label">all-time</span>
-                            <span class="uptime-chip-value window-uptime-all">--</span>
-                        </span>
+                    <div class="uptime-window">
+                        <span class="uptime-window-label">24h</span>
+                        <span class="uptime-window-value window-uptime-24h">--</span>
                     </div>
-                    <div class="uptime-window-row uptime-window-row--wrap">
-                        <span class="uptime-chip">
-                            <span class="uptime-chip-label">Timeouts 30d</span>
-                            <span class="uptime-chip-value window-timeouts-30d">--</span>
-                        </span>
-                        <span class="uptime-chip">
-                            <span class="uptime-chip-label">Timeouts all-time</span>
-                            <span class="uptime-chip-value window-timeouts-all">--</span>
-                        </span>
+                    <div class="uptime-window">
+                        <span class="uptime-window-label">30d</span>
+                        <span class="uptime-window-value window-uptime-30d">--</span>
+                    </div>
+                    <div class="uptime-window">
+                        <span class="uptime-window-label">All&#8209;time</span>
+                        <span class="uptime-window-value window-uptime-all">--</span>
                     </div>
                 </div>
                 <div class="details-grid">
@@ -179,6 +167,10 @@
                     <div class="detail-item">
                         <span class="detail-label">Timeouts (all&#8209;time)</span>
                         <span class="detail-value detail-timeouts">--</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Timeouts (30d)</span>
+                        <span class="detail-value detail-timeouts-30d">--</span>
                     </div>
                     <div class="detail-item">
                         <span class="detail-label">RPC</span>
@@ -205,8 +197,10 @@
             <div class="card-footer">
                 <span class="last-check-label">Last check:</span>
                 <span class="last-check-time"></span>
-                <!-- Huginn liveness: announced politely so the state change is
-                     not carried by colour alone. -->
+                <!-- Huginn liveness: label/value pair mirroring "Last check"
+                     above, announced politely so a state change is never
+                     carried by colour alone. -->
+                <span class="last-check-label huginn-liveness-label">Huginn:</span>
                 <span class="huginn-liveness" role="status" aria-live="polite"></span>
             </div>
         </div>

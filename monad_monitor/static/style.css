@@ -627,68 +627,50 @@ body {
 }
 
 /* ============================================
-   Uptime Windows (always-visible chips)
+   Uptime Windows
+   A single bordered strip with hairline-separated segments. Typography
+   mirrors .metric-label / .metric-value so it reads as part of the card's
+   label/value system instead of free-standing text.
    ============================================ */
 .uptime-windows {
     display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-    padding-bottom: var(--space-3);
+    align-items: stretch;
     margin-bottom: var(--space-3);
-    border-bottom: 1px solid var(--border-default);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
 }
 
-/* Rows never wrap: the three window chips and the two timeout chips stay on
-   one line each so their values keep their column alignment. */
-.uptime-window-row {
-    display: flex;
-    flex-wrap: nowrap;
-    justify-content: space-between;
-    gap: var(--space-2);
-}
-
-/* Exception: a very large timeout count (e.g. 1,234,567) can make the two
-   timeout chips wider than a narrow card. That row splits onto two lines
-   rather than truncating a label - the uptime row above always stays on one. */
-.uptime-window-row--wrap {
-    flex-wrap: wrap;
-}
-
-.uptime-window-row--wrap .uptime-chip {
-    flex: 1 1 auto;
-}
-
-.uptime-window-row--wrap .uptime-chip-label {
-    overflow: visible;
-    text-overflow: clip;
-}
-
-.uptime-chip {
+.uptime-window {
     flex: 1 1 0;
     min-width: 0;
-    display: inline-flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: var(--space-1);
-    padding: 2px 5px;
-    border-radius: var(--radius-sm);
-    background: rgba(255, 255, 255, 0.03);
-    font-family: var(--font-mono);
-    font-size: 0.5625rem;
-    white-space: nowrap;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: var(--space-2) var(--space-3);
 }
 
-.uptime-chip-label {
+.uptime-window + .uptime-window {
+    border-left: 1px solid var(--border-default);
+}
+
+.uptime-window-label {
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    font-weight: 500;
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-.uptime-chip-value {
-    color: var(--text-secondary);
+.uptime-window-value {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
     font-weight: 500;
+    color: var(--text-secondary);
+    white-space: nowrap;
 }
 
 /* ============================================
@@ -783,13 +765,19 @@ body {
     color: var(--text-secondary);
 }
 
-/* Huginn liveness sits at the far end of the footer; state is also written
-   as text so the stale treatment is never colour-only. */
+/* Huginn liveness mirrors the "Last check" label/value pair; state is also
+   written as text so the stale treatment is never colour-only. */
+.huginn-liveness-label {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+    margin-left: auto;
+}
+
 .huginn-liveness {
     font-family: var(--font-mono);
     font-size: 0.6875rem;
     color: var(--text-secondary);
-    margin-left: auto;
     white-space: nowrap;
 }
 
