@@ -5,7 +5,7 @@ import signal
 import sys
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, Tuple
 
 from .alerts import AlertHandler, escape_markdown
@@ -190,16 +190,24 @@ def handle_huginn_timeout(
 
 
 def format_epoch_boundary_eta(boundary: float) -> str:
-    """Render a boundary timestamp as "in about 4h 14m, around 21:34 (local time)".
+    """Render a boundary as "in about 4h 14m, around 21:34 local (18:34 UTC)".
 
-    Times are naive-local, the convention the health reports already use (the
-    container's TZ env picks the zone).
+    Clock times follow the container's TZ env, which defaults to UTC. UTC is
+    named on its own when the two coincide, and alongside the local time
+    otherwise, so the estimate never depends on the reader knowing how the
+    monitor happens to be configured.
     """
     remaining = max(0, int(boundary - time.time()))
     hours, minutes = divmod(remaining // 60, 60)
     delta = f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
-    local_time = datetime.fromtimestamp(boundary).strftime("%H:%M")
-    return f"in about {delta}, around {local_time} (local time)"
+
+    local = datetime.fromtimestamp(boundary).astimezone()
+    if local.utcoffset() == timedelta(0):
+        clock = f"around {local.strftime('%H:%M')} UTC"
+    else:
+        utc = datetime.fromtimestamp(boundary, timezone.utc)
+        clock = f"around {local.strftime('%H:%M')} local ({utc.strftime('%H:%M')} UTC)"
+    return f"in about {delta}, {clock}"
 
 
 def warn_if_leaving_next_epoch(

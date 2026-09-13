@@ -266,7 +266,7 @@ nano .env
 | `SLACK_WEBHOOK_URL` | No | Slack incoming webhook URL |
 | `DASHBOARD_PASSWORD` | No | Metrics dashboard password (empty = disabled) |
 | `DASHBOARD_JWT_SECRET` | No | JWT secret for metrics dashboard (`openssl rand -hex 32`) |
-| `TZ` | No | Timezone (default: UTC) |
+| `TZ` | No | Timezone (default: UTC). Alert clock times follow it; the UTC equivalent is shown alongside whenever the two differ |
 | `HEALTH_PORT` | No | Overrides `health_server.port` (default 8181) |
 | `DASHBOARD_PORT` | No | Overrides `dashboard_server.port` (default 8282) |
 | `API_PORT` | No | Metrics dashboard port (default 8383) |

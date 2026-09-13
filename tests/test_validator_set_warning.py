@@ -1,15 +1,38 @@
 """Tests for the M4 next-epoch active set exit warning (Huginn staking data)"""
 
+import contextlib
+import os
 import time
 from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock
 
+import pytest
 import responses
 
 from monad_monitor.alerts import AlertHandler
 from monad_monitor.config import ValidatorConfig
 from monad_monitor.huginn import ValidatorSetState
 from monad_monitor.main import notify_if_entering_next_epoch, warn_if_leaving_next_epoch
+
+requires_tzset = pytest.mark.skipif(
+    not hasattr(time, "tzset"), reason="tzset is POSIX-only"
+)
+
+
+@contextlib.contextmanager
+def container_tz(value: str):
+    """Run a block with the process timezone set (tzset re-reads TZ)."""
+    previous = os.environ.get("TZ")
+    os.environ["TZ"] = value
+    time.tzset()
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = previous
+        time.tzset()
 
 
 def make_validator_set(
@@ -277,7 +300,27 @@ class TestValidatorSetWarning:
         message = self.alerts.alert_warning.call_args[0][0]
         assert "next epoch boundary - in about 4h" in message
         assert "around" in message
-        assert "(local time)" in message
+        # Whatever the container TZ, the clock never goes out unlabelled
+        assert "UTC" in message
+
+    @requires_tzset
+    def test_eta_names_utc_when_the_container_runs_in_utc(self):
+        with container_tz("UTC"):
+            self._warn(boundary=time.time() + 601)
+
+        message = self.alerts.alert_warning.call_args[0][0]
+        assert "in about 10m, around " in message
+        assert "UTC" in message
+        assert "local" not in message
+
+    @requires_tzset
+    def test_eta_names_local_and_utc_when_the_container_is_offset(self):
+        with container_tz("UTC-3"):
+            self._warn(boundary=time.time() + 601)
+
+        message = self.alerts.alert_warning.call_args[0][0]
+        assert "local (" in message
+        assert "UTC" in message
 
     def test_eta_under_an_hour_drops_the_hour_part(self):
         self._warn(boundary=time.time() + 601)
@@ -293,7 +336,7 @@ class TestValidatorSetWarning:
 
         assert result is True
         message = self.alerts.alert_warning.call_args[0][0]
-        assert "(local time)" not in message
+        assert "UTC" not in message
         assert "one further epoch" in message
 
     def test_eta_is_omitted_when_the_boundary_is_unknown(self):
@@ -301,7 +344,7 @@ class TestValidatorSetWarning:
 
         assert result is True
         message = self.alerts.alert_warning.call_args[0][0]
-        assert "(local time)" not in message
+        assert "UTC" not in message
         assert "next epoch boundary." in message
 
     def test_warning_uses_non_pushover_channels(self):
@@ -462,7 +505,7 @@ class TestReentryNotice:
 
         message = self.alerts.alert_info.call_args[0][0]
         assert "next epoch boundary - in about 4h" in message
-        assert "(local time)" in message
+        assert "UTC" in message
 
     def test_eta_omitted_during_a_delay_period(self):
         self._notify(
@@ -471,5 +514,5 @@ class TestReentryNotice:
         )
 
         message = self.alerts.alert_info.call_args[0][0]
-        assert "(local time)" not in message
+        assert "UTC" not in message
         assert "one further epoch" in message
