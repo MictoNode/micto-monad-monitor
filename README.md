@@ -93,8 +93,8 @@ You should get a **"Monad Monitor Started"** message on your configured alert ch
 | **Network Timeout** | Missed rounds seen by network (Huginn), increase ≥ `huginn_timeout_alert_threshold` | Telegram + Pushover + Discord + Slack |
 | **High Resources (Critical)** | CPU/RAM/Disk ≥ 95% | Telegram + Pushover + Discord + Slack |
 | **High Resources (Warning)** | CPU/RAM/Disk ≥ 90% | Telegram + Discord + Slack |
-| **Active Set Changes** | Enters or leaves active set | Telegram + Discord + Slack |
-| **Active Set Exit Warning** | Huginn staking data lists your validator as leaving the active set next epoch (`monitoring.validator_set_warning`, on by default) | Telegram + Discord + Slack |
+| **Active Set Changes** | Enters or leaves active set; the LEFT alert notes when the validator is already in the staking entering list for the next epoch (queued to return at the next epoch boundary) | Telegram + Discord + Slack |
+| **Active Set Exit Warning** | Huginn staking data lists your validator as leaving the active set next epoch (`monitoring.validator_set_warning`, on by default). On testnet the message notes that active-set membership is rotated in batches by an automated rotation script and a leaving entry is often routine; on mainnet the raw exit warning is sent unchanged | Telegram + Discord + Slack |
 | **Recovery** | Validator back online | Telegram + Discord + Slack |
 | **Extended Report** | 6-hour detailed report with 24h, 30d and all-time uptime | Telegram + Discord + Slack |
 
@@ -660,7 +660,7 @@ micto-monad-monitor/
 
 | API | Purpose | Rate Limit |
 |-----|---------|------------|
-| [Huginn Tech](https://huginn.tech) | Validator uptime (rolling 24h, 30d and cumulative epoch snapshots), active set and next-epoch exit warnings | API v2: uptime/validator endpoints have no documented per-validator limit; client requests `period=all` + `period=30d` and merges `/health` for the 24h figure; caches 10 min. Staking endpoints (`/staking/validator-set`, `/validators`) are limited to **60 req/min/IP shared**, so they are fetched once per network per cache interval |
+| [Huginn Tech](https://huginn.tech) | Validator uptime (rolling 24h, 30d and cumulative epoch snapshots), active set and next-epoch exit warnings | API v2: uptime/validator endpoints have no documented per-validator limit; client requests `period=all` + `period=30d` and merges `/health` for the 24h figure; caches 10 min. Staking endpoints (`/staking/validator-set`, `/validators`) are limited to **60 req/min/IP shared**: the validator-set (forward-looking enter/leave lists) is refreshed every 2 minutes — independent of the per-validator uptime cache so exit warnings stay fresh — and the secp→id map once per cache interval |
 | [gmonads.com](https://gmonads.com) | Network TPS, block fullness, fallback | 30 req/min |
 
 ---
