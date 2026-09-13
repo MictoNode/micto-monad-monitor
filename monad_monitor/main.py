@@ -8,7 +8,7 @@ import traceback
 from datetime import datetime
 from typing import Dict, Any, Optional, Tuple
 
-from .alerts import AlertHandler
+from .alerts import AlertHandler, escape_markdown
 from .config import (
     load_config,
     load_validators,
@@ -162,7 +162,7 @@ def handle_huginn_timeout(
             f"+{timeout_increase} (total: {huginn_timeout_count})"
         )
         alert_success = alerts.alert_critical(
-            f"*{validator_name}*\n\n"
+            f"*{escape_markdown(validator_name)}*\n\n"
             f"⚠️ Network Timeout Detected\n\n"
             f"Validator missed {timeout_increase} round(s) as seen by network.\n"
             f"Total timeouts: {huginn_timeout_count}",
@@ -265,7 +265,7 @@ def warn_if_leaving_next_epoch(
     )
 
     message = (
-        f"*{validator.name}*\n\n"
+        f"*{escape_markdown(validator.name)}*\n\n"
         f"⚠️ Leaving Active Set Next Epoch\n\n"
         f"Huginn staking data: validator id {validator_id} is in the "
         f"leaving list for epoch {epoch} (stake {stake})."
@@ -455,6 +455,16 @@ def main():
     else:
         info("API server disabled (DASHBOARD_PASSWORD and DASHBOARD_JWT_SECRET not set)")
 
+    # Ensure state directory exists (for Docker volume persistence)
+    state_dir = STATE_DIR
+    if not os.path.exists(state_dir):
+        try:
+            os.makedirs(state_dir, exist_ok=True)
+            debug(f"Created state directory: {state_dir}")
+        except OSError as e:
+            warning(f"Failed to create state directory {state_dir}: {e}. Using current directory.")
+            state_dir = "."
+
     # Initialize components
     alerts = AlertHandler(
         telegram_token=config["telegram"]["token"],
@@ -463,6 +473,9 @@ def main():
         pushover_app_token=config["pushover"].get("app_token"),
         discord_webhook_url=config.get("discord", {}).get("webhook_url"),
         slack_webhook_url=config.get("slack", {}).get("webhook_url"),
+        # Persisted on the state volume so a restart/crash cannot drop a queued
+        # CRITICAL; writes are best-effort (a read-only dir degrades to memory)
+        failed_alerts_path=os.path.join(state_dir, "failed_alerts.json"),
     )
 
 
@@ -489,16 +502,6 @@ def main():
     states: Dict[str, Dict] = {}
     state_machines: Dict[str, ValidatorStateMachine] = {}
     health_checkers: Dict[str, ValidatorHealthChecker] = {}
-
-    # Ensure state directory exists (for Docker volume persistence)
-    state_dir = STATE_DIR
-    if not os.path.exists(state_dir):
-        try:
-            os.makedirs(state_dir, exist_ok=True)
-            debug(f"Created state directory: {state_dir}")
-        except OSError as e:
-            warning(f"Failed to create state directory {state_dir}: {e}. Using current directory.")
-            state_dir = "."
 
     # New-version update checker (checks GHCR weekly and notifies via non-Pushover channels)
     version_checker = None
@@ -746,7 +749,7 @@ def main():
 
                             # Send warning alert after 3 consecutive occurrences
                             if state["warning_counts"][warning_key] == 3:
-                                alerts.alert_warning(f"*{validator.name}*\n\n{warn_msg}")
+                                alerts.alert_warning(f"*{escape_markdown(validator.name)}*\n\n{warn_msg}")
                                 state["warning_counts"][warning_key] = -10  # Cooldown to prevent spam
                     else:
                         # Reset warning counts on healthy check
@@ -766,7 +769,7 @@ def main():
                             # Send critical alert after 2 consecutive occurrences (faster than warnings)
                             if state["critical_counts"][critical_key] == 2:
                                 alerts.alert_critical(
-                                    f"*{validator.name}*\n\n{critical_msg}",
+                                    f"*{escape_markdown(validator.name)}*\n\n{critical_msg}",
                                     validator_name=validator.name
                                 )
                                 state["critical_counts"][critical_key] = -10  # Cooldown to prevent spam
@@ -791,7 +794,7 @@ def main():
                             if state["ts_fails"] >= ts_threshold and not state["ts_alert_active"]:
                                 # Send WARNING (not CRITICAL) for ts_validation_fail
                                 alert_success = alerts.alert_warning(
-                                    f"*{validator.name}*\n\n⚠️ Persistent timestamp validation fails detected\n"
+                                    f"*{escape_markdown(validator.name)}*\n\n⚠️ Persistent timestamp validation fails detected\n"
                                     f"This may be a network-wide issue (clock skew/NTP)\n\n"
                                     f"{health_status.message}"
                                 )
@@ -803,13 +806,13 @@ def main():
                             # Recovery notification for ts_validation_fail
                             if state["ts_alert_active"]:
                                 alerts.alert_info(
-                                    f"✅ *{validator.name}*\n\nTimestamp validation fails stabilized"
+                                    f"✅ *{escape_markdown(validator.name)}*\n\nTimestamp validation fails stabilized"
                                 )
                                 state["ts_alert_active"] = False
 
                         # Recovery notification (Telegram + Discord)
                         if state["alert_active"]:
-                            recovery_msg = f"✅ *{validator.name} RECOVERED*\n\n{health_status.message}"
+                            recovery_msg = f"✅ *{escape_markdown(validator.name)} RECOVERED*\n\n{health_status.message}"
                             alerts.alert_info(recovery_msg)
                             alerts.reset_pushover_cooldown(validator.name)
                             state["alert_active"] = False
@@ -837,7 +840,7 @@ def main():
                         # Trigger alert if threshold reached
                         if state["fails"] >= threshold and not state["alert_active"]:
                             alert_success = alerts.alert_critical(
-                                f"*{validator.name}*\n\n{health_status.message}",
+                                f"*{escape_markdown(validator.name)}*\n\n{health_status.message}",
                                 validator_name=validator.name,
                             )
                             # Only mark alert_active if alert was actually sent
@@ -866,6 +869,10 @@ def main():
             # Contain a failure in the per-cycle steps (publishing, reports,
             # version check, retry queue): a bad cycle must not stop monitoring.
             try:
+                # The loop is still making progress: refresh the /health
+                # heartbeat before the tail steps (report + bounded retry batch)
+                if health_server:
+                    health_server.touch_heartbeat()
                 # Fetch per-network TPS from gmonads and attach to each validator.
                 # Kept BEFORE publishing: the HTTP threads serialize these dicts, so
                 # the loop must finish writing them before they become visible.
@@ -944,6 +951,11 @@ def main():
                 while running and slept < sleep_interval:
                     time.sleep(1)
                     slept += 1
+                    # Keep /health fresh while waiting: the wait is part of a
+                    # progressing loop, not a stall - otherwise a large
+                    # check_interval would look like a wedge
+                    if health_server:
+                        health_server.touch_heartbeat()
 
     finally:
         # Graceful shutdown

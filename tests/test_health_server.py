@@ -353,6 +353,21 @@ class TestHealthFreshness:
             server.stop()
         assert data["alerts"]["telegram"]["failed"] == 1
 
+    def test_touch_heartbeat_resets_the_age(self):
+        """The loop touches the heartbeat as it progresses (per second while waiting)"""
+        server = HealthServer(port=_free_port(), staleness_threshold=5.0)
+        try:
+            server.update_status(loop_tick=time.time() - 30)
+            assert server.get_health_status().is_fresh() is False
+
+            server.touch_heartbeat()
+
+            status = server.get_health_status()
+            assert status.is_fresh() is True
+            assert status.check_age_seconds() < 2
+        finally:
+            server.stop()
+
 
 class TestUpdateStatusIsolation:
     """The loop keeps mutating its dicts; the served payload must not follow"""

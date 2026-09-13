@@ -1,9 +1,11 @@
 """Alert handlers - Telegram, Pushover, Discord, and Slack"""
 
+import json
+import os
 import re
 import threading
 import time
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, List, Tuple, Union
 
 import requests
 
@@ -19,12 +21,70 @@ PUSHOVER_CRITICAL_COOLDOWN_SECONDS = 30 * 60
 # Maximum number of failed alerts to queue for retry
 MAX_FAILED_ALERTS_QUEUE_SIZE = 10
 
+# Failed alerts older than this are dropped instead of retried (a stale
+# "node down" from an hour ago is noise, not news)
+FAILED_ALERT_MAX_AGE_SECONDS = 3600
+
+# How many queued alerts are retried per monitoring cycle. Each retry fans out
+# to four channels with a 10s timeout, so an unbounded batch can stall the loop
+# for minutes during a channel outage; the rest waits for the next cycle (and
+# survives a restart because the queue is persisted).
+MAX_RETRY_PER_CYCLE = 3
+
+# Consecutive outage-class failures on a channel before one WARNING is sent
+# through the healthy channels
+CHANNEL_FAILURE_ALERT_THRESHOLD = 3
+
 # Credentials live inside the request URL (Telegram bot token, Discord/Slack
 # webhook ids) and `requests` echoes that URL back in exception text - including
 # the scheme-less "url: /bot<TOKEN>/sendMessage" form urllib3 uses for
 # ConnectionError. Every send failure is therefore redacted before it is logged.
 _URL_IN_ERROR_RE = re.compile(r"(?:https?://|url:\s*)\S+")
 CHANNELS = ("telegram", "pushover", "discord", "slack")
+
+# Legacy Markdown (Telegram's parse_mode="Markdown") treats these as markup:
+# [text](url), *bold*, _italic_, `code`. A validator name (or any API-provided
+# string) containing one of them makes Telegram reject the whole message with
+# 400 "can't parse entities" - i.e. the channel goes silent for that validator.
+_MARKDOWN_ESCAPE_RE = re.compile(r"([_*`\[\]\\])")
+_MARKDOWN_ESCAPED_RE = re.compile(r"\\([_*`\[\]\\])")
+
+
+def escape_markdown(text: str) -> str:
+    """Escape legacy-Markdown characters in a DYNAMIC value (name, host, ...).
+
+    Static message text keeps its intentional markup; only values interpolated
+    into it go through here.
+    """
+    return _MARKDOWN_ESCAPE_RE.sub(r"\\\1", str(text))
+
+
+def unescape_markdown(text: str) -> str:
+    """Undo escape_markdown for channels that render text verbatim.
+
+    Discord treats a backslash as an escape, Slack does not, but neither should
+    display the backslashes this module added - only our own escape sequences
+    are undone, so an unrelated backslash in the text survives untouched.
+    """
+    return _MARKDOWN_ESCAPED_RE.sub(r"\1", text)
+
+
+def _failure_is_outage(exc: Exception) -> bool:
+    """Whether a send failure means the channel is down (vs our message bad).
+
+    400/413 come from our own payload (unparseable/too long), so they must not
+    mark a healthy channel as down; auth failures, rate limits, missing
+    endpoints, server errors and connection errors all do.
+    """
+    response = getattr(exc, "response", None)
+    if response is None:
+        return True  # connection error, timeout, DNS, ...
+    status = getattr(response, "status_code", None)
+    if status is None:
+        return True
+    if status in (400, 413):
+        return False
+    return True
 
 
 def redact_error(text: str, secrets: Optional[List[str]] = None) -> str:
@@ -62,6 +122,7 @@ class AlertHandler:
         discord_rate_limit: int = 5,  # Max 5 alerts per minute
         slack_rate_limit: int = 5,  # Max 5 alerts per minute
         pushover_critical_cooldown: int = PUSHOVER_CRITICAL_COOLDOWN_SECONDS,
+        failed_alerts_path: Optional[str] = None,
     ):
         self.telegram_token = telegram_token
         self.telegram_chat_id = telegram_chat_id
@@ -123,17 +184,53 @@ class AlertHandler:
         # Failed alerts queue for retry (prevents alert loss on network issues)
         # Each entry: (message, validator_name, timestamp_failed)
         self._failed_alerts_queue: List[Tuple[str, Optional[str], float]] = []
+        # Optional state-volume path: the queue survives a restart/crash there
+        self._failed_alerts_path = failed_alerts_path
+        self._queue_write_failed_logged = False
+        self._load_failed_alerts()
 
-    def _record_send(self, channel: str, success: bool) -> None:
-        """Record one channel delivery outcome"""
+        # A channel that crossed the outage threshold already had its operator
+        # warning; reset when it delivers again (one warning per episode)
+        self._channel_down_notified: Dict[str, bool] = {c: False for c in CHANNELS}
+
+    def _record_send(
+        self, channel: str, success: bool, track: bool = True, outage: bool = True
+    ) -> bool:
+        """Record one channel delivery outcome.
+
+        Args:
+            track: False for messages the monitor sends about itself (a
+                channel-down warning), so they never perturb the counters they
+                are derived from.
+            outage: whether this failure means the channel is unreachable. Our
+                own malformed/oversized payloads do not.
+
+        Returns:
+            True when this call crossed the channel-down threshold (the caller
+            warns AFTER this returns, i.e. with the lock released).
+        """
+        if not track:
+            return False
+
         with self._stats_lock:
             stats = self._channel_stats[channel]
             if success:
                 stats["sent"] += 1
                 stats["consecutive_failures"] = 0
-            else:
-                stats["failed"] += 1
+                self._channel_down_notified[channel] = False
+                return False
+
+            stats["failed"] += 1
+            if outage:
                 stats["consecutive_failures"] += 1
+            if (
+                outage
+                and stats["consecutive_failures"] >= CHANNEL_FAILURE_ALERT_THRESHOLD
+                and not self._channel_down_notified[channel]
+            ):
+                self._channel_down_notified[channel] = True
+                return True
+            return False
 
     def get_channel_stats(self) -> Dict[str, Dict[str, int]]:
         """Per-channel delivery counters (copy - safe to serialize off-thread)"""
@@ -142,12 +239,72 @@ class AlertHandler:
                 channel: dict(stats) for channel, stats in self._channel_stats.items()
             }
 
+    def _channel_is_configured(self, channel: str) -> bool:
+        """Whether a channel has credentials/webhook configured"""
+        return {
+            "telegram": bool(self.telegram_token and self.telegram_chat_id),
+            "pushover": bool(self.pushover_user_key and self.pushover_app_token),
+            "discord": bool(self.discord_webhook_url),
+            "slack": bool(self.slack_webhook_url),
+        }[channel]
+
+    def _warn_channel_down(self, channel: str) -> bool:
+        """Tell the operator, through the healthy channels, that one is down.
+
+        Sent AFTER the stats lock is released, with track=False so the warning
+        neither feeds the counters nor re-triggers itself. Pushover is excluded
+        by construction (`alert_warning` never uses it). Returns True if any
+        channel took the message.
+        """
+        stats = self.get_channel_stats()
+        healthy = [
+            other
+            for other in CHANNELS
+            if other != channel
+            # WARNING-class message: Pushover stays reserved for CRITICAL alerts
+            and other != "pushover"
+            and self._channel_is_configured(other)
+            and stats[other]["consecutive_failures"] < CHANNEL_FAILURE_ALERT_THRESHOLD
+        ]
+        if not healthy:
+            logger.error(
+                f"Alert channel '{channel}' is failing and no healthy channel is "
+                f"left to report it - check /health 'alerts' counters"
+            )
+            return False
+
+        message = (
+            f"⚠️ Alert channel degraded: *{channel}*\n\n"
+            f"{stats[channel]['consecutive_failures']} consecutive delivery failures "
+            f"(configured={self._channel_is_configured(channel)}).\n"
+            f"Alerts are still going out through: {', '.join(healthy)}.\n"
+            f"Verify the {channel} credentials/webhook in your configuration."
+        )
+        delivered = False
+        for other in healthy:
+            if other == "telegram":
+                delivered |= self.send_telegram(message, track=False)
+            elif other == "discord":
+                delivered |= self.send_discord(message, track=False)
+            elif other == "slack":
+                delivered |= self.send_slack(message, track=False)
+            elif other == "pushover":
+                delivered |= self.send_pushover(message, track=False)
+        if delivered:
+            logger.warning(
+                f"Alert channel '{channel}' down after "
+                f"{stats[channel]['consecutive_failures']} failures - warned "
+                f"through {', '.join(healthy)}"
+            )
+        return delivered
+
     def send_telegram(
         self,
         message: str,
         parse_mode: str = "Markdown",
         bypass_rate_limit: bool = False,
         silent: bool = False,
+        track: bool = True,
     ) -> bool:
         """Send message via Telegram bot with rate limiting
 
@@ -156,6 +313,8 @@ class AlertHandler:
             parse_mode: Telegram parse mode (default: Markdown)
             bypass_rate_limit: If True, skip rate limiting (for CRITICAL alerts)
             silent: If True, send without notification sound (for periodic reports)
+            track: If False, do not count this send in the channel statistics
+                (used for the channel-down warning itself)
 
         Returns:
             True if message was sent successfully, False otherwise
@@ -181,13 +340,17 @@ class AlertHandler:
         try:
             response = requests.post(url, json=payload, timeout=10)
             response.raise_for_status()
-            self._record_send("telegram", True)
+            self._record_send("telegram", True, track=track)
             if bypass_rate_limit:
                 logger.info("Telegram CRITICAL alert sent (rate limit bypassed)")
             return True
         except requests.exceptions.RequestException as e:
-            self._record_send("telegram", False)
+            crossed = self._record_send(
+                "telegram", False, track=track, outage=_failure_is_outage(e)
+            )
             logger.error(f"Telegram send error: {redact_error(str(e), self._secrets)}")
+            if crossed:
+                self._warn_channel_down("telegram")
             return False
 
     def send_pushover(
@@ -198,6 +361,7 @@ class AlertHandler:
         sound: str = "pushover",
         bypass_rate_limit: bool = False,
         validator_name: Optional[str] = None,
+        track: bool = True,
     ) -> bool:
         """Send message via Pushover (emergency alerts that bypass DND) with rate limiting
 
@@ -208,6 +372,7 @@ class AlertHandler:
             sound: Notification sound
             bypass_rate_limit: If True, skip rate limiting (for CRITICAL alerts)
             validator_name: Optional validator name for cooldown tracking
+            track: If False, do not count this send in the channel statistics
 
         Returns:
             True if message was sent successfully, False otherwise
@@ -260,13 +425,17 @@ class AlertHandler:
             if priority == 2 and validator_name:
                 self._pushover_critical_last_sent[validator_name] = time.time()
 
-            self._record_send("pushover", True)
+            self._record_send("pushover", True, track=track)
             if bypass_rate_limit:
                 logger.info(f"Pushover CRITICAL alert sent for {validator_name or 'unknown'}")
             return True
         except requests.exceptions.RequestException as e:
-            self._record_send("pushover", False)
+            crossed = self._record_send(
+                "pushover", False, track=track, outage=_failure_is_outage(e)
+            )
             logger.error(f"Pushover send error: {redact_error(str(e), self._secrets)}")
+            if crossed:
+                self._warn_channel_down("pushover")
             return False
 
     def send_discord(
@@ -276,6 +445,7 @@ class AlertHandler:
         color: int = 0x3498db,  # Blue default
         bypass_rate_limit: bool = False,
         silent: bool = False,
+        track: bool = True,
     ) -> bool:
         """Send message via Discord webhook with rate limiting
 
@@ -285,6 +455,7 @@ class AlertHandler:
             color: Embed color (hex int, default blue)
             bypass_rate_limit: If True, skip rate limiting (for CRITICAL alerts)
             silent: If True, send without notification sound (for periodic reports)
+            track: If False, do not count this send in the channel statistics
 
         Returns:
             True if message was sent successfully, False otherwise
@@ -305,7 +476,9 @@ class AlertHandler:
             "embeds": [
                 {
                     "title": title,
-                    "description": message,
+                    # Discord renders text verbatim (it has its own markdown),
+                    # so the Telegram escapes must not leak through as backslashes
+                    "description": unescape_markdown(message),
                     "color": color,
                     "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 }
@@ -319,13 +492,17 @@ class AlertHandler:
         try:
             response = requests.post(self.discord_webhook_url, json=payload, timeout=10)
             response.raise_for_status()
-            self._record_send("discord", True)
+            self._record_send("discord", True, track=track)
             if bypass_rate_limit:
                 logger.info("Discord CRITICAL alert sent (rate limit bypassed)")
             return True
         except requests.exceptions.RequestException as e:
-            self._record_send("discord", False)
+            crossed = self._record_send(
+                "discord", False, track=track, outage=_failure_is_outage(e)
+            )
             logger.error(f"Discord send error: {redact_error(str(e), self._secrets)}")
+            if crossed:
+                self._warn_channel_down("discord")
             return False
 
     def send_slack(
@@ -335,6 +512,7 @@ class AlertHandler:
         color: str = "#3498db",  # Blue default
         bypass_rate_limit: bool = False,
         silent: bool = False,
+        track: bool = True,
     ) -> bool:
         """Send message via Slack incoming webhook with rate limiting
 
@@ -344,6 +522,7 @@ class AlertHandler:
             color: Attachment sidebar color (hex string, default blue)
             bypass_rate_limit: If True, skip rate limiting (for CRITICAL alerts)
             silent: Unused (Slack webhooks don't support silent mode), kept for API parity
+            track: If False, do not count this send in the channel statistics
 
         Returns:
             True if message was sent successfully, False otherwise
@@ -362,7 +541,8 @@ class AlertHandler:
             "attachments": [
                 {
                     "title": title,
-                    "text": message,
+                    # Slack has no backslash escape, so Telegram escapes must not leak
+                    "text": unescape_markdown(message),
                     "color": color,
                     "ts": int(time.time()),
                 }
@@ -372,13 +552,17 @@ class AlertHandler:
         try:
             response = requests.post(self.slack_webhook_url, json=payload, timeout=10)
             response.raise_for_status()
-            self._record_send("slack", True)
+            self._record_send("slack", True, track=track)
             if bypass_rate_limit:
                 logger.info("Slack CRITICAL alert sent (rate limit bypassed)")
             return True
         except requests.exceptions.RequestException as e:
-            self._record_send("slack", False)
+            crossed = self._record_send(
+                "slack", False, track=track, outage=_failure_is_outage(e)
+            )
             logger.error(f"Slack send error: {redact_error(str(e), self._secrets)}")
+            if crossed:
+                self._warn_channel_down("slack")
             return False
 
     def alert_warning(self, message: str) -> bool:
@@ -543,6 +727,74 @@ class AlertHandler:
             del self._pushover_critical_last_sent[validator_name]
             logger.debug(f"Pushover cooldown reset for {validator_name}")
 
+    def _load_failed_alerts(self) -> None:
+        """Load the retry queue from the state volume, dropping stale entries.
+
+        Fail-open: a missing, unreadable or corrupt file leaves an empty queue
+        (the monitor must never fail to start because of it).
+        """
+        if not self._failed_alerts_path or not os.path.exists(self._failed_alerts_path):
+            return
+        try:
+            with open(self._failed_alerts_path, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, ValueError) as exc:
+            logger.warning(
+                f"Could not read the failed-alert queue "
+                f"({self._failed_alerts_path}): {exc} - starting with an empty queue"
+            )
+            return
+
+        now = time.time()
+        entries = data if isinstance(data, list) else []
+        loaded = 0
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            message = entry.get("message")
+            failed_at = entry.get("failed_at")
+            if not isinstance(message, str) or not isinstance(failed_at, (int, float)):
+                continue
+            if now - float(failed_at) >= FAILED_ALERT_MAX_AGE_SECONDS:
+                continue
+            if len(self._failed_alerts_queue) >= MAX_FAILED_ALERTS_QUEUE_SIZE:
+                break
+            self._failed_alerts_queue.append(
+                (message, entry.get("validator"), float(failed_at))
+            )
+            loaded += 1
+        if loaded:
+            logger.info(
+                f"Loaded {loaded} failed alert(s) from the retry queue "
+                f"({self._failed_alerts_path})"
+            )
+
+    def _save_failed_alerts(self) -> None:
+        """Persist the retry queue (atomic replace), tolerating a read-only dir.
+
+        A failure here must not break alerting: the alert path is the whole
+        point of this object, so we log once and keep the in-memory queue.
+        """
+        if not self._failed_alerts_path:
+            return
+        payload = [
+            {"message": message, "validator": validator_name, "failed_at": failed_at}
+            for message, validator_name, failed_at in self._failed_alerts_queue
+        ]
+        temp_path = f"{self._failed_alerts_path}.tmp"
+        try:
+            with open(temp_path, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle)
+            os.replace(temp_path, self._failed_alerts_path)
+            self._queue_write_failed_logged = False
+        except OSError as exc:
+            if not self._queue_write_failed_logged:
+                logger.error(
+                    f"Could not persist the failed-alert queue to "
+                    f"{self._failed_alerts_path}: {exc} - retries stay in memory only"
+                )
+                self._queue_write_failed_logged = True
+
     def _queue_failed_alert(self, message: str, validator_name: Optional[str]) -> None:
         """Queue a failed alert for retry.
 
@@ -556,12 +808,16 @@ class AlertHandler:
             logger.warning(f"Dropping oldest failed alert to make room: {old_val or 'unknown'}")
 
         self._failed_alerts_queue.append((message, validator_name, time.time()))
+        self._save_failed_alerts()
         logger.info(f"Queued failed alert for retry: {validator_name or 'unknown'} (queue size: {len(self._failed_alerts_queue)})")
 
     def retry_failed_alerts(self) -> int:
-        """Retry sending all failed alerts in the queue.
+        """Retry a bounded batch of failed alerts.
 
-        Call this periodically from the main loop to retry failed alerts.
+        Capped at MAX_RETRY_PER_CYCLE: each retry fans out to four channels with
+        a 10s timeout, so draining a full queue in one monitoring cycle could
+        stall the loop for minutes exactly when the channels are already broken.
+        Unprocessed entries stay queued (and persisted) for the next cycle.
 
         Returns:
             Number of alerts successfully sent
@@ -569,11 +825,12 @@ class AlertHandler:
         if not self._failed_alerts_queue:
             return 0
 
+        batch = self._failed_alerts_queue[:MAX_RETRY_PER_CYCLE]
+        remaining = self._failed_alerts_queue[MAX_RETRY_PER_CYCLE:]
+        self._failed_alerts_queue = []
         sent_count = 0
-        retry_queue = self._failed_alerts_queue.copy()
-        self._failed_alerts_queue.clear()
 
-        for message, validator_name, failed_at in retry_queue:
+        for message, validator_name, failed_at in batch:
             age_seconds = int(time.time() - failed_at)
             logger.info(f"Retrying failed alert for {validator_name or 'unknown'} (age: {age_seconds}s)")
 
@@ -612,13 +869,15 @@ class AlertHandler:
                 sent_count += 1
                 logger.info(f"Successfully retried alert for {validator_name or 'unknown'}")
             else:
-                # Still failing, re-queue if not too old (max 1 hour)
-                if age_seconds < 3600:
-                    self._failed_alerts_queue.append((message, validator_name, failed_at))
+                # Still failing, re-queue if not too old
+                if age_seconds < FAILED_ALERT_MAX_AGE_SECONDS:
+                    remaining.append((message, validator_name, failed_at))
                     logger.warning(f"Retry failed for {validator_name or 'unknown'}, re-queued")
                 else:
                     logger.error(f"Dropping stale alert for {validator_name or 'unknown'} (age: {age_seconds}s)")
 
+        self._failed_alerts_queue.extend(remaining)
+        self._save_failed_alerts()
         return sent_count
 
     def get_failed_queue_size(self) -> int:

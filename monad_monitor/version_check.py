@@ -7,6 +7,7 @@ from typing import List, Optional, Tuple
 
 import requests
 
+from .alerts import escape_markdown
 from .logger import get_logger
 
 logger = get_logger()
@@ -68,7 +69,7 @@ def build_update_message(latest: str, current: str) -> str:
         return v[1:] if v[:1] in ("v", "V") else v
 
     return (
-        f"🆕 New monitor version v{_display(latest)} available (running: v{_display(current)})\n\n"
+        f"🆕 New monitor version v{escape_markdown(_display(latest))} available (running: v{escape_markdown(_display(current))})\n\n"
         f"Update:\n"
         f"cd $HOME/micto-monad-monitor/ && git pull && docker compose pull && docker compose up -d\n\n"
         f"📌 Don't forget to check whether config/config.yaml, config/validators.yaml, .env and "

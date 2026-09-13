@@ -4,7 +4,7 @@ import time
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from .alerts import AlertHandler
+from .alerts import AlertHandler, escape_markdown
 from .config import ValidatorConfig
 
 
@@ -109,9 +109,9 @@ class HealthReporter:
                 status_emoji = "❌"
 
             report_lines.append(
-                f"{status_emoji} *{validator.name}*"
+                f"{status_emoji} *{escape_markdown(validator.name)}*"
             )
-            report_lines.append(f"   Host: `{validator.host}`")
+            report_lines.append(f"   Host: `{escape_markdown(validator.host)}`")
 
             # Add last known status
             last_height = state.get("last_height")
@@ -177,8 +177,8 @@ class HealthReporter:
                 unhealthy_count += 1
                 status_emoji = "❌"
 
-            report_lines.append(f"{status_emoji} *{validator.name}*")
-            report_lines.append(f"   Host: `{validator.host}`")
+            report_lines.append(f"{status_emoji} *{escape_markdown(validator.name)}*")
+            report_lines.append(f"   Host: `{escape_markdown(validator.host)}`")
 
             # Basic metrics
             last_height = state.get("last_height")
@@ -343,7 +343,7 @@ class HealthReporter:
         ]
 
         for v in validators:
-            msg_lines.append(f"• {v.name} (`{v.host}`)")
+            msg_lines.append(f"• {escape_markdown(v.name)} (`{escape_markdown(v.host)}`)")
 
         msg = "\n".join(msg_lines)
         plain_msg = msg.replace("*", "").replace("`", "")

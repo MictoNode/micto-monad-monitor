@@ -233,6 +233,19 @@ class HealthServer:
             self._server = None
             self._thread = None
 
+    def touch_heartbeat(self, at: Optional[float] = None) -> None:
+        """Mark the monitor loop as alive (this drives /health freshness).
+
+        Called per validator, at the start of the per-cycle tail and once per
+        second while the loop waits for the next cycle. Freshness therefore
+        answers "is the loop making progress?" rather than "how long is a
+        cycle?": a slow-but-advancing loop (any check_interval, any validator
+        count) never looks stale, while a wedged one is caught within the
+        staleness threshold.
+        """
+        with self._lock:
+            self._status.last_check = at if at is not None else time.time()
+
     def update_status(
         self,
         is_healthy: Optional[bool] = None,

@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Dict, Any, List, ClassVar
 
+from .alerts import escape_markdown
+
 
 class ValidatorState(Enum):
     """
@@ -41,23 +43,23 @@ class StateTransition:
     def get_alert_message(self) -> str:
         """Generate alert message for this transition"""
         if self.from_state == ValidatorState.NEW and self.to_state == ValidatorState.ACTIVE:
-            msg = f"🟢 *{self.validator_name} ENTERED ACTIVE SET*\n\n"
+            msg = f"🟢 *{escape_markdown(self.validator_name)} ENTERED ACTIVE SET*\n\n"
             msg += "Validator is now in the active set and producing blocks!"
             return msg
 
         elif self.from_state == ValidatorState.ACTIVE and self.to_state == ValidatorState.INACTIVE:
-            msg = f"⚪ *{self.validator_name} LEFT ACTIVE SET*\n\n"
+            msg = f"⚪ *{escape_markdown(self.validator_name)} LEFT ACTIVE SET*\n\n"
             msg += "Validator is no longer in the active set.\n"
             msg += "Block production alerts disabled until re-entry."
             return msg
 
         elif self.from_state == ValidatorState.INACTIVE and self.to_state == ValidatorState.ACTIVE:
-            msg = f"🟢 *{self.validator_name} RE-ENTERED ACTIVE SET*\n\n"
+            msg = f"🟢 *{escape_markdown(self.validator_name)} RE-ENTERED ACTIVE SET*\n\n"
             msg += "Validator is back in the active set!\n"
             msg += "Block production alerts re-enabled."
             return msg
 
-        return f"ℹ️ {self.validator_name}: State changed from {self.from_state.value} to {self.to_state.value}"
+        return f"ℹ️ {escape_markdown(self.validator_name)}: State changed from {self.from_state.value} to {self.to_state.value}"
 
 
 class ValidatorStateMachine:

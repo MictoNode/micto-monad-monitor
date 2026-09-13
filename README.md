@@ -648,12 +648,16 @@ micto-monad-monitor/
 | `GET /metrics` | Prometheus metrics |
 
 `/health` answers **"is the monitor loop still ticking?"**: it returns `200` while
-the monitor keeps checking, and `503` once the last check is older than
-`health_server.staleness_threshold` (default `300` seconds). Validator health is
-reported in the body, never in the status code — a validator having a bad minute
-must not mark the monitoring container itself as down, and any external watchdog
-(healthchecks.io, UptimeRobot, an orchestrator…) can be pointed at `/health` and
-read exactly what it says:
+the monitor keeps checking, and `503` once the last tick is older than
+`health_server.staleness_threshold` (default `300` seconds). The heartbeat
+advances every second while the loop runs (and per validator during a check), so
+this is a **stall detector, not a cycle timer**: a slow cycle — any
+`check_interval`, any number of validators — never trips it, while a wedged loop
+is caught within the threshold. Validator health is reported in the body, never
+in the status code — a validator having a bad minute must not mark the monitoring
+container itself as down, and any external watchdog (healthchecks.io,
+UptimeRobot, an orchestrator…) can be pointed at `/health` and read exactly what
+it says:
 
 ```json
 {
@@ -675,7 +679,27 @@ read exactly what it says:
 The `alerts` block is how a silently dead channel becomes visible: only channels
 that are configured and actually attempted are counted, so a non-zero
 `failed` (or a growing `consecutive_failures`) on a channel that should be
-delivering alerts is the signal that the channel itself is broken.
+delivering alerts is the signal that the channel itself is broken. When a
+channel crosses three consecutive **outage-class** failures (connection error,
+401/403/404/429 or 5xx), the monitor sends one WARNING through the channels that
+still work — once per episode, re-armed after the channel delivers again. A 400
+or 413 is treated as our own payload problem rather than a channel outage, so a
+formatting/length bug can never masquerade as a dead channel.
+
+Telegram's legacy Markdown is also respected: characters that would break the
+parse (`_ * \` [`) are escaped inside dynamic values (validator names, hosts)
+before they are interpolated, so a validator whose name contains one of them no
+longer makes Telegram reject the message with 400 — the failure mode that used
+to silence the channel entirely for that validator. Discord and Slack receive the
+un-escaped text. Telegram's 4096-character message limit is out of scope (the
+monitor's own messages are structurally bounded).
+
+Alerts that no channel accepted are queued for retry **on the state volume**
+(`/app/state/failed_alerts.json`), so a restart, a crash or a long outage cannot
+lose a CRITICAL; retries are bounded to three per monitoring cycle so draining
+the queue cannot stall the loop, and entries older than an hour are dropped. If
+the state directory is not writable the queue degrades to memory-only with an
+error log — alerting itself never depends on disk.
 
 ### Monitor Dashboard (:8282)
 
