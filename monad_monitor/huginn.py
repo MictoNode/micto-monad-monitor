@@ -44,11 +44,6 @@ VALIDATORS_LIST_PATH = "/validators"
 VALIDATOR_HEALTH_SUFFIX = "/health"
 VALIDATOR_SET_PATH = "/staking/validator-set"
 STATUS_PATH = "/status"
-# Per-epoch network uptime rows (one per epoch, newest first, each carrying
-# `snapshot_ts` written when that epoch ended). Used only to derive the epoch
-# cadence, so the next-epoch exit warning can name the actual boundary time.
-NETWORK_UPTIME_PATH = "/validators/network/uptime"
-NETWORK_UPTIME_PERIOD_QUERY = "?period=30d"
 
 # /validators pagination for the secp -> validator_id map. The staking API is
 # limited to 60 req/min/IP shared across ALL staking calls, so the map is
@@ -70,13 +65,6 @@ VALIDATOR_SET_CACHE_TTL = 120
 # staking budget, short enough to self-heal.
 PARTIAL_SECP_ID_MAP_TTL = 120
 
-# Epoch cadence (see get_next_epoch_boundary). Epochs run ~4h14m, so a refresh
-# every hour is plenty; a failed fetch retries sooner, and cadence data lagging
-# more than a few epochs behind the network is treated as unusable instead of
-# being extrapolated into a prediction.
-EPOCH_CADENCE_CACHE_TTL = 3600
-EPOCH_CADENCE_RETRY_TTL = 300
-MAX_EPOCH_CADENCE_LAG = 3
 
 # Validator API "status" field values (v2)
 STATUS_ACTIVE = "active"
@@ -324,9 +312,6 @@ class HuginnClient:
         self._secp_id_cache: Dict[str, Dict[str, int]] = {}
         self._secp_id_times: Dict[str, float] = {}
         self._secp_id_complete: Dict[str, bool] = {}
-        # Epoch cadence per network: {"newest_epoch", "newest_ts", "duration"}
-        self._epoch_cadence_cache: Dict[str, Dict[str, float]] = {}
-        self._epoch_cadence_times: Dict[str, float] = {}
         # Circuit breaker for each network
         self._circuit_breakers: Dict[str, CircuitBreaker] = {}
         # Logger
@@ -732,111 +717,6 @@ class HuginnClient:
             fetched_at=time.time(),
         )
 
-    def get_next_epoch_boundary(
-        self, network: str = "testnet", current_epoch: Optional[int] = None
-    ) -> Optional[float]:
-        """
-        Unix timestamp at which `current_epoch` ends, or None if it cannot be derived.
-
-        Huginn publishes one network-uptime row per epoch, and each row's
-        `snapshot_ts` is written when that epoch ends - so the newest row marks
-        the start of the epoch after it, and the boundary ending `current_epoch`
-        sits that many cadence steps further along. Naming the boundary is what
-        turns "you are leaving next epoch" into an actionable time.
-
-        Fail-open by contract: no cadence data, a missing/odd epoch, data lagging
-        more than MAX_EPOCH_CADENCE_LAG epochs behind, a boundary already in the
-        past, or an unexpected payload shape all return None so callers omit the
-        estimate rather than show a wrong one. Never raises.
-
-        Args:
-            network: Network name ('testnet' or 'mainnet'). Defaults to 'testnet'.
-            current_epoch: The epoch being reported on (``ValidatorSetState.epoch``).
-
-        Returns:
-            A ``time.time()``-based timestamp, or None.
-        """
-        try:
-            if not isinstance(current_epoch, int) or isinstance(current_epoch, bool):
-                return None
-
-            cadence = self._get_epoch_cadence(network)
-            if cadence is None:
-                return None
-
-            newest_epoch = int(cadence["newest_epoch"])
-            if current_epoch < newest_epoch:
-                return None
-
-            steps = max(1, current_epoch - newest_epoch)
-            if steps > MAX_EPOCH_CADENCE_LAG:
-                return None
-
-            boundary = cadence["newest_ts"] + steps * cadence["duration"]
-            if boundary <= time.time():
-                return None
-            return boundary
-        except Exception as e:
-            # Enrichment data must never break the alert path that asked for it.
-            self._logger.debug(f"Next-epoch boundary unavailable for {network}: {e}")
-            return None
-
-    def _get_epoch_cadence(self, network: str) -> Optional[Dict[str, float]]:
-        """
-        Cached epoch cadence for a network (see get_next_epoch_boundary).
-
-        Fetched with the auxiliary single-shot path (no circuit-breaker
-        involvement, like the other staking enrichment calls). Successes are
-        cached for EPOCH_CADENCE_CACHE_TTL, failures retry after
-        EPOCH_CADENCE_RETRY_TTL; a failure returns the previous value, which is
-        None until one fetch succeeds.
-        """
-        cache_key = network.lower()
-        now = time.time()
-        cached = self._epoch_cadence_cache.get(cache_key)
-        ttl = EPOCH_CADENCE_CACHE_TTL if cached is not None else EPOCH_CADENCE_RETRY_TTL
-        if cached is not None and now - self._epoch_cadence_times.get(cache_key, 0) < ttl:
-            return cached
-
-        base_url = self.config.get_endpoint(network)
-        data = self._get_json_aux(
-            f"{base_url}{NETWORK_UPTIME_PATH}{NETWORK_UPTIME_PERIOD_QUERY}", network
-        )
-        cadence = self._parse_epoch_cadence(data)
-        self._epoch_cadence_times[cache_key] = now
-        if cadence is None:
-            return cached
-
-        self._epoch_cadence_cache[cache_key] = cadence
-        return cadence
-
-    def _parse_epoch_cadence(self, data: Any) -> Optional[Dict[str, float]]:
-        """Epoch cadence from the two newest /validators/network/uptime rows."""
-        if not isinstance(data, dict):
-            return None
-
-        rows = [
-            row
-            for row in (data.get("epochs") or [])
-            if isinstance(row, dict)
-            and isinstance(row.get("epoch"), int)
-            and isinstance(row.get("snapshot_ts"), (int, float))
-        ]
-        if len(rows) < 2:
-            return None
-
-        rows.sort(key=lambda row: row["epoch"], reverse=True)
-        newest, previous = rows[0], rows[1]
-        duration = float(newest["snapshot_ts"]) - float(previous["snapshot_ts"])
-        if duration <= 0:
-            return None
-
-        return {
-            "newest_epoch": int(newest["epoch"]),
-            "newest_ts": float(newest["snapshot_ts"]),
-            "duration": duration,
-        }
-
     def get_validator_set(self, network: str = "testnet") -> Optional[ValidatorSetState]:
         """
         Consensus vs next-epoch vs eligible set comparison for a network.
@@ -1085,8 +965,6 @@ class HuginnClient:
         self._secp_id_cache.clear()
         self._secp_id_times.clear()
         self._secp_id_complete.clear()
-        self._epoch_cadence_cache.clear()
-        self._epoch_cadence_times.clear()
 
     def get_cache_age(
         self, secp_address: str, network: str = "testnet"

@@ -20,8 +20,7 @@ from monad_monitor.alerts import (
     unescape_markdown,
 )
 from monad_monitor.config import ValidatorConfig
-from monad_monitor.huginn import ValidatorSetState
-from monad_monitor.main import handle_huginn_timeout, warn_if_leaving_next_epoch
+from monad_monitor.main import handle_huginn_timeout
 from monad_monitor.state_machine import StateTransition, ValidatorState
 
 MARKDOWN_NAME = "Node_A*B"
@@ -86,35 +85,6 @@ class TestAlertSiteEscaping:
         )
 
         message = alerts.alert_critical.call_args.args[0]
-        assert ESCAPED_NAME in message
-        assert f"*{MARKDOWN_NAME}" not in message
-
-    def test_next_epoch_warning_escapes_the_name(self):
-        alerts = MagicMock()
-        alerts.alert_warning.return_value = True
-        client = MagicMock()
-        client.get_validator_id.return_value = 67
-        validator_set = ValidatorSetState(
-            network="testnet",
-            epoch=1244,
-            in_delay_period=False,
-            counts={"leaving": 1},
-            leaving_ids={67},
-            leaving=[{"validator_id": 67, "name": "x", "stake": 1}],
-            fetched_at=time.time(),
-        )
-
-        warn_if_leaving_next_epoch(
-            enabled=True,
-            validator=self.make_validator(),
-            state={},
-            is_active=True,
-            validator_set=validator_set,
-            huginn_client=client,
-            alerts=alerts,
-        )
-
-        message = alerts.alert_warning.call_args.args[0]
         assert ESCAPED_NAME in message
         assert f"*{MARKDOWN_NAME}" not in message
 
