@@ -49,18 +49,18 @@ class TestValidatorSetWarning:
             network="testnet",
         )
         self.state: Dict[str, Any] = {"last_validator_set_warning_epoch": None}
-        self.huginn_data: Dict[str, Any] = {"is_active": True}
+        self.is_active: Optional[bool] = True
         self.alerts = MagicMock()
         self.alerts.alert_warning.return_value = True
         self.client = MagicMock()
         self.client.get_validator_id.return_value = 67
 
-    def _warn(self, enabled: bool = True, validator_set=None, huginn_data=None):
+    def _warn(self, enabled: bool = True, validator_set=None, is_active=None):
         return warn_if_leaving_next_epoch(
             enabled=enabled,
             validator=self.validator,
             state=self.state,
-            huginn_data=self.huginn_data if huginn_data is None else huginn_data,
+            is_active=self.is_active if is_active is None else is_active,
             validator_set=validator_set or make_validator_set(),
             huginn_client=self.client,
             alerts=self.alerts,
@@ -123,17 +123,38 @@ class TestValidatorSetWarning:
         self.alerts.alert_warning.assert_not_called()
 
     def test_no_warning_when_validator_not_active(self):
-        result = self._warn(huginn_data={"is_active": False})
+        result = self._warn(is_active=False)
 
         assert result is False
         self.alerts.alert_warning.assert_not_called()
+
+    def test_no_warning_when_verdict_unknown(self):
+        result = warn_if_leaving_next_epoch(
+            enabled=True,
+            validator=self.validator,
+            state=self.state,
+            is_active=None,
+            validator_set=make_validator_set(),
+            huginn_client=self.client,
+            alerts=self.alerts,
+        )
+
+        assert result is False
+        self.alerts.alert_warning.assert_not_called()
+
+    def test_warning_fires_when_only_gmonads_reports_active(self):
+        """Combined verdict is authoritative: Huginn raw value no longer gates M4."""
+        result = self._warn(is_active=True)
+
+        assert result is True
+        self.alerts.alert_warning.assert_called_once()
 
     def test_no_warning_when_validator_set_unavailable(self):
         result = warn_if_leaving_next_epoch(
             enabled=True,
             validator=self.validator,
             state=self.state,
-            huginn_data=self.huginn_data,
+            is_active=self.is_active,
             validator_set=None,
             huginn_client=self.client,
             alerts=self.alerts,
@@ -181,7 +202,7 @@ class TestValidatorSetWarning:
                 enabled=True,
                 validator=self.validator,
                 state=self.state,
-                huginn_data=self.huginn_data,
+                is_active=self.is_active,
                 validator_set=make_validator_set(),
                 huginn_client=self.client,
                 alerts=alerts,

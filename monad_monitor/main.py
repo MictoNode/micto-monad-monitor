@@ -60,7 +60,7 @@ def warn_if_leaving_next_epoch(
     enabled: bool,
     validator: ValidatorConfig,
     state: Dict[str, Any],
-    huginn_data: Optional[Dict[str, Any]],
+    is_active: Optional[bool],
     validator_set: Optional[ValidatorSetState],
     huginn_client: Optional[HuginnClient],
     alerts: AlertHandler,
@@ -76,7 +76,9 @@ def warn_if_leaving_next_epoch(
     - the validator set is available;
     - the validator's secp address resolves to an API id;
     - that id is in the leaving list;
-    - the validator is currently active (Huginn ``is_active``);
+    - the combined active-set verdict is True (Huginn ``is_active``,
+      overridden by gmonads on disagreement - the same verdict the state
+      machine consumes);
     - the epoch differs from the one already warned about.
 
     Fail-open by design: missing/failed Huginn data skips the warning and
@@ -94,8 +96,8 @@ def warn_if_leaving_next_epoch(
         debug(f"{validator.name}: validator set unavailable - skipping next-epoch exit warning")
         return False
 
-    if not huginn_data or huginn_data.get("is_active") is not True:
-        debug(f"{validator.name}: not in active set - skipping next-epoch exit warning")
+    if is_active is not True:
+        debug(f"{validator.name}: not in active set (combined verdict) - skipping next-epoch exit warning")
         return False
 
     network = validator.network or "testnet"
@@ -530,7 +532,7 @@ def main():
                     enabled=validator_set_warning_enabled,
                     validator=validator,
                     state=state,
-                    huginn_data=health_status.huginn_data,
+                    is_active=health_status.is_active_validator,
                     validator_set=validator_set_cache.get(network),
                     huginn_client=huginn_client,
                     alerts=alerts,
