@@ -7,7 +7,7 @@ Multi-validator stratejisi ile ag round referansi alir ve circuit breaker ile da
 import time
 import logging
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from enum import Enum, auto
 
 import requests
@@ -56,6 +56,14 @@ MAX_VALIDATOR_PAGES = 10
 # turns the next-epoch exit warning into a lottery. 120s stays far inside the
 # staking rate budget (60 req/min/IP shared across all staking calls).
 VALIDATOR_SET_CACHE_TTL = 120
+
+# secp -> validator_id map. A COMPLETE map is stable and cached for the full
+# check_interval; a PARTIAL one (a page failed mid-pagination, or the API
+# stopped reporting `total`) must not be trusted that long or the next-epoch
+# exit warning is silently skipped for an hour. It is cached briefly instead -
+# long enough to avoid re-paging on every cycle against the shared 60 req/min
+# staking budget, short enough to self-heal.
+PARTIAL_SECP_ID_MAP_TTL = 120
 
 # Validator API "status" field values (v2)
 STATUS_ACTIVE = "active"
@@ -302,6 +310,7 @@ class HuginnClient:
         self._validator_set_failure_logged: Dict[str, bool] = {}
         self._secp_id_cache: Dict[str, Dict[str, int]] = {}
         self._secp_id_times: Dict[str, float] = {}
+        self._secp_id_complete: Dict[str, bool] = {}
         # Circuit breaker for each network
         self._circuit_breakers: Dict[str, CircuitBreaker] = {}
         # Logger
@@ -816,30 +825,65 @@ class HuginnClient:
         """
         Cached {secp_address -> validator_id} map for a network.
 
-        Pages through /validators (limit/offset) and caches per network for
-        check_interval. Failures return whatever was cached before (or an empty
-        map) rather than raising - callers treat a missing id as "unknown".
+        Pages through /validators (limit/offset). A COMPLETE map is cached for
+        check_interval; a PARTIAL map is cached for PARTIAL_SECP_ID_MAP_TTL and
+        never replaces a complete one. Failures return whatever was cached before
+        (or an empty map) rather than raising - callers treat a missing id as
+        "unknown".
         """
         cache_key = network.lower()
         now = time.time()
         cached = self._secp_id_cache.get(cache_key)
+        complete_cached = self._secp_id_complete.get(cache_key, False)
+        ttl = self.config.check_interval if complete_cached else PARTIAL_SECP_ID_MAP_TTL
         if cached is not None and \
-                now - self._secp_id_times.get(cache_key, 0) < self.config.check_interval:
+                now - self._secp_id_times.get(cache_key, 0) < ttl:
             return cached
 
         base_url = self.config.get_endpoint(network)
-        mapping = self._fetch_secp_id_map(base_url, network)
-        if not mapping:
-            return cached if cached is not None else {}
+        mapping, complete = self._fetch_secp_id_map(base_url, network)
 
-        self._secp_id_cache[cache_key] = mapping
-        self._secp_id_times[cache_key] = now
-        return mapping
+        if complete and mapping:
+            self._secp_id_cache[cache_key] = mapping
+            self._secp_id_times[cache_key] = now
+            self._secp_id_complete[cache_key] = True
+            return mapping
 
-    def _fetch_secp_id_map(self, base_url: str, network: str) -> Dict[str, int]:
-        """Page through /validators and build the secp -> id map."""
+        if complete_cached and cached is not None:
+            # A partial refresh must not downgrade a good map. Refresh the timer
+            # so the retry happens on the next interval instead of every cycle
+            # (the staking budget is shared with the validator-set endpoint).
+            self._secp_id_times[cache_key] = now
+            self._logger.debug(
+                f"Partial validator id map for {network} - keeping the complete map"
+            )
+            return cached
+
+        if mapping:
+            self._secp_id_cache[cache_key] = mapping
+            self._secp_id_times[cache_key] = now
+            self._secp_id_complete[cache_key] = False
+            self._logger.debug(
+                f"Partial validator id map for {network}: {len(mapping)} entries "
+                f"- cached for {PARTIAL_SECP_ID_MAP_TTL}s"
+            )
+            return mapping
+
+        return cached if cached is not None else {}
+
+    def _fetch_secp_id_map(
+        self, base_url: str, network: str
+    ) -> Tuple[Dict[str, int], bool]:
+        """Page through /validators and build the secp -> id map.
+
+        Returns the map plus whether pagination ran to completion. `complete` is
+        False when a page request failed, the payload shape was unexpected, or
+        the API stopped reporting `total` - such a map covers an unknown subset
+        of validators and must not be trusted as if it were whole.
+        """
         mapping: Dict[str, int] = {}
         offset = 0
+        complete = False
 
         for _ in range(MAX_VALIDATOR_PAGES):
             url = (
@@ -862,12 +906,16 @@ class HuginnClient:
                 if secp and validator_id is not None:
                     mapping[str(secp).lower()] = validator_id
 
-            offset += len(validators)
             total = data.get("total")
-            if not validators or not isinstance(total, int) or offset >= total:
+            if not validators or not isinstance(total, int):
                 break
 
-        return mapping
+            offset += len(validators)
+            if offset >= total:
+                complete = True
+                break
+
+        return mapping, complete
 
     def is_validator_active(
         self, secp_address: Optional[str], network: str = "testnet"
@@ -915,6 +963,7 @@ class HuginnClient:
         self._validator_set_failure_logged.clear()
         self._secp_id_cache.clear()
         self._secp_id_times.clear()
+        self._secp_id_complete.clear()
 
     def get_cache_age(
         self, secp_address: str, network: str = "testnet"

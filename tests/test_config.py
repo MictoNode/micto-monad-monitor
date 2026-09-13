@@ -341,6 +341,27 @@ class TestValidateConfig:
             validate_config(config)
         assert "huginn_timeout_alert_threshold" in str(exc_info.value)
 
+    def test_validate_config_staleness_threshold_accepted(self):
+        """A positive staleness threshold is valid"""
+        config = {
+            "telegram": {"token": "test", "chat_id": "test"},
+            "health_server": {"staleness_threshold": 120},
+            "thresholds": {},
+        }
+        validate_config(config)  # should not raise
+
+    def test_validate_config_staleness_threshold_rejected(self):
+        """A non-positive threshold would make /health permanently stale"""
+        for bad_value in (0, -5, "300"):
+            config = {
+                "telegram": {"token": "test", "chat_id": "test"},
+                "health_server": {"staleness_threshold": bad_value},
+                "thresholds": {},
+            }
+            with pytest.raises(ConfigValidationError) as exc_info:
+                validate_config(config)
+            assert "staleness_threshold" in str(exc_info.value)
+
 
 class TestValidateValidators:
     """Test cases for validate_validators function"""

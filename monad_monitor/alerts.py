@@ -1,5 +1,7 @@
 """Alert handlers - Telegram, Pushover, Discord, and Slack"""
 
+import re
+import threading
 import time
 from typing import Dict, Optional, List, Tuple
 
@@ -16,6 +18,22 @@ PUSHOVER_CRITICAL_COOLDOWN_SECONDS = 30 * 60
 
 # Maximum number of failed alerts to queue for retry
 MAX_FAILED_ALERTS_QUEUE_SIZE = 10
+
+# Credentials live inside the request URL (Telegram bot token, Discord/Slack
+# webhook ids) and `requests` echoes that URL back in exception text - including
+# the scheme-less "url: /bot<TOKEN>/sendMessage" form urllib3 uses for
+# ConnectionError. Every send failure is therefore redacted before it is logged.
+_URL_IN_ERROR_RE = re.compile(r"(?:https?://|url:\s*)\S+")
+CHANNELS = ("telegram", "pushover", "discord", "slack")
+
+
+def redact_error(text: str, secrets: Optional[List[str]] = None) -> str:
+    """Strip URLs and known credentials from an exception message"""
+    redacted = _URL_IN_ERROR_RE.sub("<redacted>", text)
+    for secret in secrets or []:
+        if secret:
+            redacted = redacted.replace(secret, "<redacted>")
+    return redacted
 
 
 class AlertHandler:
@@ -79,9 +97,50 @@ class AlertHandler:
         # Key: validator_name, Value: timestamp of last Pushover CRITICAL
         self._pushover_critical_last_sent: Dict[str, float] = {}
 
+        # Per-channel delivery counters. Visibility only - the monitor does not
+        # alert on them (a "channel down" alert needs its own design). Only
+        # attempts that reach the network are counted: a missing credential or a
+        # rate-limit drop says nothing about the channel's health.
+        self._channel_stats: Dict[str, Dict[str, int]] = {
+            channel: {"sent": 0, "failed": 0, "consecutive_failures": 0}
+            for channel in CHANNELS
+        }
+        self._stats_lock = threading.Lock()
+
+        # Credentials echoed back by exception text; never let them reach a log line
+        self._secrets = [
+            secret
+            for secret in (
+                telegram_token,
+                pushover_app_token,
+                pushover_user_key,
+                discord_webhook_url,
+                slack_webhook_url,
+            )
+            if secret
+        ]
+
         # Failed alerts queue for retry (prevents alert loss on network issues)
         # Each entry: (message, validator_name, timestamp_failed)
         self._failed_alerts_queue: List[Tuple[str, Optional[str], float]] = []
+
+    def _record_send(self, channel: str, success: bool) -> None:
+        """Record one channel delivery outcome"""
+        with self._stats_lock:
+            stats = self._channel_stats[channel]
+            if success:
+                stats["sent"] += 1
+                stats["consecutive_failures"] = 0
+            else:
+                stats["failed"] += 1
+                stats["consecutive_failures"] += 1
+
+    def get_channel_stats(self) -> Dict[str, Dict[str, int]]:
+        """Per-channel delivery counters (copy - safe to serialize off-thread)"""
+        with self._stats_lock:
+            return {
+                channel: dict(stats) for channel, stats in self._channel_stats.items()
+            }
 
     def send_telegram(
         self,
@@ -122,11 +181,13 @@ class AlertHandler:
         try:
             response = requests.post(url, json=payload, timeout=10)
             response.raise_for_status()
+            self._record_send("telegram", True)
             if bypass_rate_limit:
                 logger.info("Telegram CRITICAL alert sent (rate limit bypassed)")
             return True
         except requests.exceptions.RequestException as e:
-            logger.error(f"Telegram send error: {e}")
+            self._record_send("telegram", False)
+            logger.error(f"Telegram send error: {redact_error(str(e), self._secrets)}")
             return False
 
     def send_pushover(
@@ -199,11 +260,13 @@ class AlertHandler:
             if priority == 2 and validator_name:
                 self._pushover_critical_last_sent[validator_name] = time.time()
 
+            self._record_send("pushover", True)
             if bypass_rate_limit:
                 logger.info(f"Pushover CRITICAL alert sent for {validator_name or 'unknown'}")
             return True
         except requests.exceptions.RequestException as e:
-            logger.error(f"Pushover send error: {e}")
+            self._record_send("pushover", False)
+            logger.error(f"Pushover send error: {redact_error(str(e), self._secrets)}")
             return False
 
     def send_discord(
@@ -256,12 +319,13 @@ class AlertHandler:
         try:
             response = requests.post(self.discord_webhook_url, json=payload, timeout=10)
             response.raise_for_status()
-
+            self._record_send("discord", True)
             if bypass_rate_limit:
                 logger.info("Discord CRITICAL alert sent (rate limit bypassed)")
             return True
         except requests.exceptions.RequestException as e:
-            logger.error(f"Discord send error: {e}")
+            self._record_send("discord", False)
+            logger.error(f"Discord send error: {redact_error(str(e), self._secrets)}")
             return False
 
     def send_slack(
@@ -308,12 +372,13 @@ class AlertHandler:
         try:
             response = requests.post(self.slack_webhook_url, json=payload, timeout=10)
             response.raise_for_status()
-
+            self._record_send("slack", True)
             if bypass_rate_limit:
                 logger.info("Slack CRITICAL alert sent (rate limit bypassed)")
             return True
         except requests.exceptions.RequestException as e:
-            logger.error(f"Slack send error: {e}")
+            self._record_send("slack", False)
+            logger.error(f"Slack send error: {redact_error(str(e), self._secrets)}")
             return False
 
     def alert_warning(self, message: str) -> bool:

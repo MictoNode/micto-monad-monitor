@@ -42,6 +42,40 @@ class TestDashboardServerHealth:
         finally:
             server.stop()
 
+    def test_health_reports_loop_freshness(self, monkeypatch):
+        """The public dashboard payload carries the monitor-loop heartbeat
+
+        This endpoint is reached from the internet in production, so a watchdog
+        pointed at it must be able to tell a live monitor from a wedged one
+        without relying on the 8181 status code.
+        """
+        monkeypatch.setenv("MONITOR_VERSION", "9.9.9")
+        server = DashboardServer(host="127.0.0.1", port=DASHBOARD_PORT)
+        server.start()
+        try:
+            server.update_validators(
+                {"Validator1": {"state": "active", "healthy": True}},
+                status="healthy",
+                uptime_seconds=12.5,
+                loop_tick=time.time() - 2,
+            )
+
+            data = None
+            deadline = time.time() + 5
+            while time.time() < deadline and data is None:
+                try:
+                    url = f"http://127.0.0.1:{DASHBOARD_PORT}/health"
+                    with urllib.request.urlopen(url, timeout=2) as response:
+                        data = json.loads(response.read().decode())
+                except Exception:
+                    time.sleep(0.1)
+
+            assert data is not None, "dashboard /health did not respond"
+            assert data["freshness"] == "ok"
+            assert 1.0 <= data["check_age_seconds"] <= 4.0
+        finally:
+            server.stop()
+
     def test_index_stamps_asset_urls_with_running_version(self, monkeypatch):
         """style.css / app.js are immutable-cached, so their URLs must carry
         the running version; otherwise a release never reaches the browser."""

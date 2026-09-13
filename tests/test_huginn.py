@@ -6,7 +6,14 @@ import time
 import pytest
 import responses
 
-from monad_monitor.huginn import HuginnConfig, HuginnClient, ValidatorUptime, CircuitBreaker, CircuitState
+from monad_monitor.huginn import (
+    PARTIAL_SECP_ID_MAP_TTL,
+    CircuitBreaker,
+    CircuitState,
+    HuginnClient,
+    HuginnConfig,
+    ValidatorUptime,
+)
 
 
 # Sample API responses (Huginn Validator API v2 shape).
@@ -1280,3 +1287,86 @@ class TestValidatorSet:
     def test_validator_id_without_secp_is_none(self, client):
         assert client.get_validator_id(None, network="testnet") is None
         assert client.get_validator_id("", network="testnet") is None
+
+    def test_partial_map_is_cached_briefly_not_for_the_full_interval(self, client):
+        """A page failure must not be trusted for a whole cache interval
+
+        The next-epoch exit warning depends on this map: caching a partial one for
+        check_interval would silently skip the warning for an hour. It is cached
+        just long enough to avoid re-paging on every cycle.
+        """
+        with responses.RequestsMock() as rsps:
+            # Page 1 succeeds, page 2 fails -> partial map (3 of 3 unknown)
+            rsps.add(
+                responses.GET,
+                f"{TESTNET_API}/validators?limit=500&offset=0",
+                json={
+                    "success": True,
+                    "count": 2,
+                    "total": 4,
+                    "validators": [
+                        {"id": 1, "secp_address": "0xaaa"},
+                        {"id": 2, "secp_address": "0xbbb"},
+                    ],
+                },
+                status=200,
+            )
+            rsps.add(
+                responses.GET,
+                f"{TESTNET_API}/validators?limit=500&offset=2",
+                status=500,
+            )
+
+            assert client.get_validator_id("0xaaa", network="testnet") == 1
+            calls_after_first = len(rsps.calls)
+            assert calls_after_first == 2
+
+            # Within PARTIAL_SECP_ID_MAP_TTL the partial map is reused (no storm)
+            assert client.get_validator_id("0xbbb", network="testnet") == 2
+            assert len(rsps.calls) == calls_after_first
+
+            # Once it expires the API is asked again
+            client._secp_id_times["testnet"] -= PARTIAL_SECP_ID_MAP_TTL + 1
+            assert client.get_validator_id("0xaaa", network="testnet") == 1
+            assert len(rsps.calls) > calls_after_first
+
+    def test_partial_refresh_does_not_replace_a_complete_map(self, client):
+        """A good map survives a partial refresh attempt"""
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.GET,
+                f"{TESTNET_API}/validators?limit=500&offset=0",
+                json={
+                    "success": True,
+                    "count": 1,
+                    "total": 1,
+                    "validators": [{"id": 7, "secp_address": "0xcomplete"}],
+                },
+                status=200,
+            )
+            assert client.get_validator_id("0xcomplete", network="testnet") == 7
+
+            # Force a refresh; this time the page fails
+            client._secp_id_times["testnet"] -= client.config.check_interval + 1
+            rsps.add(
+                responses.GET,
+                f"{TESTNET_API}/validators?limit=500&offset=0",
+                status=500,
+            )
+
+            # The known id is still resolvable from the complete map
+            assert client.get_validator_id("0xcomplete", network="testnet") == 7
+            assert client._secp_id_complete["testnet"] is True
+
+    def test_map_without_total_is_not_cached_as_complete(self, client):
+        """`total` missing means pagination cannot be verified"""
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.GET,
+                f"{TESTNET_API}/validators?limit=500&offset=0",
+                json={"success": True, "validators": [{"id": 5, "secp_address": "0xccc"}]},
+                status=200,
+            )
+
+            assert client.get_validator_id("0xccc", network="testnet") == 5
+            assert client._secp_id_complete.get("testnet") is False

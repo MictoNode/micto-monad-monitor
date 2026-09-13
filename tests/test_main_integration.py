@@ -9,6 +9,9 @@ import urllib.request
 from unittest.mock import Mock, patch, MagicMock
 from typing import Dict, Any
 
+from monad_monitor.main import apply_active_set_transition
+from monad_monitor.state_machine import ValidatorState, ValidatorStateMachine
+
 # We're testing the integration points, not the full main loop
 # These tests verify that main.py correctly initializes and uses:
 # 1. HealthServer (port 8181)
@@ -324,139 +327,54 @@ class TestMainIntegrationPattern:
 
 
 class TestStateMachineInitializationOnFailure:
-    """Test state machine initialization when Huginn API fails (Season 5.4)"""
+    """The active-set handoff in main.py (see apply_active_set_transition)
+
+    These replace copies of main.py's inline logic: a copy cannot fail when the
+    real code changes, so it guarded nothing.
+    """
+
+    def _apply(self, machine, is_active, is_ever_active):
+        return apply_active_set_transition(
+            machine, "TestValidator", is_active, is_ever_active
+        )
 
     def test_state_remains_new_when_huginn_unavailable(self):
-        """When Huginn data is unavailable on first check, state should remain NEW"""
-        from monad_monitor.state_machine import ValidatorStateMachine, ValidatorState
-
+        """An unknown verdict on the first check must not invent a state"""
         machine = ValidatorStateMachine(validator_name="TestValidator")
 
-        # Simulate the initialization logic with None Huginn data
-        # (Huginn API failure case)
-        is_active = None  # Huginn API failed
-        is_ever_active = False  # Cannot determine from None data
-        huginn_data = None
+        transition = self._apply(machine, None, False)
 
-        # Current main.py logic (lines 231-239)
-        # Initialize state machine with correct state on first check
-        # This prevents false "ENTERED ACTIVE SET" alerts on restart
-        if machine.current_state == ValidatorState.NEW and is_ever_active:
-            if is_active:
-                machine.current_state = ValidatorState.ACTIVE
-            else:
-                machine.current_state = ValidatorState.INACTIVE
-        else:
-            # If we don't have Huginn data, infer is_ever_active from current state
-            if is_ever_active is False and machine.current_state != ValidatorState.NEW:
-                is_ever_active = True
-
-            transition = machine.update(
-                is_active=is_active if is_active is not None else False,
-                is_ever_active=is_ever_active,
-                metadata={}
-            )
-
-        # When Huginn data is unavailable, state should remain NEW
-        # (not be assigned ACTIVE or INACTIVE incorrectly)
+        assert transition is None
         assert machine.current_state == ValidatorState.NEW
 
     def test_state_initializes_correctly_with_huginn_data(self):
-        """When Huginn data is available on first check, state should initialize correctly"""
-        from monad_monitor.state_machine import ValidatorStateMachine, ValidatorState
-
+        """A verified verdict at boot initializes the state without alerting"""
         machine = ValidatorStateMachine(validator_name="TestValidator")
 
-        # Simulate Huginn data showing validator is active
-        is_active = True
-        is_ever_active = True
-        huginn_data = {"is_active": True, "is_ever_active": True}
+        transition = self._apply(machine, True, True)
 
-        # Current main.py logic (lines 231-239)
-        if machine.current_state == ValidatorState.NEW and is_ever_active:
-            if is_active:
-                machine.current_state = ValidatorState.ACTIVE
-            else:
-                machine.current_state = ValidatorState.INACTIVE
-
-        # Should initialize to ACTIVE since is_ever_active=True and is_active=True
+        assert transition is None
         assert machine.current_state == ValidatorState.ACTIVE
 
     def test_state_initializes_inactive_when_previously_active(self):
-        """When validator was active but now inactive, should initialize as INACTIVE"""
-        from monad_monitor.state_machine import ValidatorStateMachine, ValidatorState
-
+        """A validator that was active but is now out of the set starts INACTIVE"""
         machine = ValidatorStateMachine(validator_name="TestValidator")
 
-        # Simulate Huginn data showing validator was active but now inactive
-        is_active = False
-        is_ever_active = True
-        huginn_data = {"is_active": False, "is_ever_active": True}
+        self._apply(machine, False, True)
 
-        # Current main.py logic (lines 231-239)
-        if machine.current_state == ValidatorState.NEW and is_ever_active:
-            if is_active:
-                machine.current_state = ValidatorState.ACTIVE
-            else:
-                machine.current_state = ValidatorState.INACTIVE
-
-        # Should initialize to INACTIVE since is_ever_active=True but is_active=False
         assert machine.current_state == ValidatorState.INACTIVE
 
     def test_no_false_active_alert_on_restart_with_huginn_failure(self):
-        """No false 'ENTERED ACTIVE SET' alert when Huginn fails on restart
-
-        Scenario:
-        1. Validator was ACTIVE before restart
-        2. Monitor restarts
-        3. Huginn API fails on first check
-        4. State should remain NEW (no false alert)
-        5. On next check, Huginn succeeds with is_ever_active=True, is_active=True
-        6. State should initialize to ACTIVE without transition alert
-        """
-        from monad_monitor.state_machine import ValidatorStateMachine, ValidatorState
-
-        # First check: Huginn API failure
+        """Unknown verdict at boot, then a verified one: initialize, never alert"""
         machine = ValidatorStateMachine(validator_name="TestValidator")
-        is_active = None
-        is_ever_active = False
 
-        if machine.current_state == ValidatorState.NEW and is_ever_active:
-            if is_active:
-                machine.current_state = ValidatorState.ACTIVE
-            else:
-                machine.current_state = ValidatorState.INACTIVE
-        else:
-            if is_ever_active is False and machine.current_state != ValidatorState.NEW:
-                is_ever_active = True
-            transition = machine.update(
-                is_active=is_active if is_active is not None else False,
-                is_ever_active=is_ever_active,
-                metadata={}
-            )
-            # No transition should occur
-            assert transition is None
-
-        # State should remain NEW
+        assert self._apply(machine, None, False) is None
         assert machine.current_state == ValidatorState.NEW
 
-        # Second check: Huginn API succeeds
-        is_active = True
-        is_ever_active = True
+        transition = self._apply(machine, True, True)
 
-        if machine.current_state == ValidatorState.NEW and is_ever_active:
-            if is_active:
-                machine.current_state = ValidatorState.ACTIVE
-            else:
-                machine.current_state = ValidatorState.INACTIVE
-            # Direct assignment, no transition created
-            transition = None
-        else:
-            transition = machine.update(is_active=is_active, is_ever_active=is_ever_active)
-
-        # State should now be ACTIVE, but NO transition alert
         assert machine.current_state == ValidatorState.ACTIVE
-        assert transition is None  # No alert should be sent
+        assert transition is None
 
 
 class TestHuginnTimeoutAlertThreshold:

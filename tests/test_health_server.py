@@ -1,13 +1,21 @@
 """Tests for Health HTTP Server"""
 
 import json
+import socket
 import time
 import pytest
 import threading
 import urllib.request
 import urllib.error
 
-from monad_monitor.health_server import HealthServer, HealthStatus
+from monad_monitor.health_server import HealthServer, HealthStatus, freshness_state
+
+
+def _free_port() -> int:
+    """An ephemeral port, so a test never collides with a running monitor"""
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
 
 
 class TestHealthStatus:
@@ -135,30 +143,54 @@ class TestHealthServer:
         finally:
             server.stop()
 
-    def test_health_endpoint_shows_unhealthy(self):
-        """Test that health endpoint reflects unhealthy state"""
-        server = HealthServer(port=18084)
+    def test_unhealthy_validator_keeps_http_200(self):
+        """Validator trouble must not mark the monitor container itself unhealthy
+
+        The HTTP status answers "is the monitor loop ticking?"; the validator
+        aggregate is reported in the body. A 503 here would fail the compose
+        healthcheck (urlopen raises) and any external watchdog whenever a
+        validator had a bad minute.
+        """
+        port = _free_port()
+        server = HealthServer(port=port)
         server.start()
         time.sleep(0.5)
 
         try:
-            # Update to unhealthy
             server.update_status(
                 is_healthy=False,
-                validators={"TestValidator": {"state": "inactive", "healthy": False}}
+                validators={"TestValidator": {"state": "inactive", "healthy": False}},
+                loop_tick=time.time(),
             )
 
-            url = "http://localhost:18084/health"
-            req = urllib.request.Request(url)
-            # Expect 503 for unhealthy status
+            url = f"http://localhost:{port}/health"
+            with urllib.request.urlopen(url, timeout=5) as response:
+                assert response.status == 200
+                data = json.loads(response.read().decode())
+                assert data["status"] == "unhealthy"
+                assert data["validators"]["TestValidator"]["healthy"] is False
+                assert data["freshness"] == "ok"
+        finally:
+            server.stop()
+
+    def test_stale_loop_returns_503(self):
+        """A loop that stopped ticking is what turns /health into a 503"""
+        port = _free_port()
+        server = HealthServer(port=port, staleness_threshold=5.0)
+        server.start()
+        time.sleep(0.5)
+
+        try:
+            server.update_status(is_healthy=True, loop_tick=time.time() - 30)
+
+            url = f"http://localhost:{port}/health"
             with pytest.raises(urllib.error.HTTPError) as exc_info:
-                urllib.request.urlopen(req, timeout=5)
+                urllib.request.urlopen(url, timeout=5)
             assert exc_info.value.code == 503
 
-            # Read the response body from the error
-            response_data = exc_info.value.read().decode()
-            data = json.loads(response_data)
-            assert data["status"] == "unhealthy"
+            data = json.loads(exc_info.value.read().decode())
+            assert data["freshness"] == "stale"
+            assert data["check_age_seconds"] >= 29
         finally:
             server.stop()
 
@@ -282,3 +314,70 @@ class TestHealthServer:
                 assert response.status == 200
         finally:
             server.stop()
+
+
+class TestHealthFreshness:
+    """Freshness of the monitor-loop heartbeat (what /health's status code means)"""
+
+    def test_freshness_state_classifies_age(self):
+        now = 1_000_000.0
+        assert freshness_state(None, 300, now) == "unknown"
+        assert freshness_state(now - 10, 300, now) == "ok"
+        assert freshness_state(now - 301, 300, now) == "stale"
+
+    def test_status_payload_reports_age_and_freshness(self):
+        status = HealthStatus(
+            last_check=time.time() - 5,
+            staleness_threshold=300,
+        )
+        data = status.to_dict()
+        assert data["freshness"] == "ok"
+        assert 4.0 <= data["check_age_seconds"] <= 6.0
+        assert status.is_fresh() is True
+
+    def test_stale_status_is_not_fresh(self):
+        status = HealthStatus(last_check=time.time() - 400, staleness_threshold=300)
+        data = status.to_dict()
+        assert data["freshness"] == "stale"
+        assert status.is_fresh() is False
+
+    def test_alert_stats_block_is_optional(self):
+        assert "alerts" not in HealthStatus().to_dict()
+
+        status = HealthStatus()
+        server = HealthServer(port=_free_port())
+        try:
+            server.update_status(alerts={"telegram": {"sent": 2, "failed": 1, "consecutive_failures": 1}})
+            data = server.get_health_status().to_dict()
+        finally:
+            server.stop()
+        assert data["alerts"]["telegram"]["failed"] == 1
+
+
+class TestUpdateStatusIsolation:
+    """The loop keeps mutating its dicts; the served payload must not follow"""
+
+    def test_caller_mutation_after_publish_is_isolated(self):
+        server = HealthServer(port=_free_port())
+        payload = {"V": {"state": "active", "height": 1}}
+        server.update_status(is_healthy=True, validators=payload, loop_tick=time.time())
+
+        # The monitor loop mutates its own dicts between iterations
+        payload["V"]["height"] = 999
+        payload["V"]["network_tps"] = 12.5
+        payload["Other"] = {"state": "new"}
+
+        served = server.get_health_status().to_dict()
+        assert served["validators"]["V"]["height"] == 1
+        assert "network_tps" not in served["validators"]["V"]
+        assert "Other" not in served["validators"]
+
+    def test_alert_stats_are_copied(self):
+        server = HealthServer(port=_free_port())
+        stats = {"telegram": {"sent": 1, "failed": 0, "consecutive_failures": 0}}
+        server.update_status(alerts=stats)
+
+        stats["telegram"]["sent"] = 99
+
+        served = server.get_health_status().to_dict()
+        assert served["alerts"]["telegram"]["sent"] == 1

@@ -107,6 +107,14 @@ You should get a **"Monad Monitor Started"** message on your configured alert ch
 > - All channels are optional — configure any combination
 > - Pushover: Only CRITICAL alerts (emergency channel), 30-minute cooldown per validator
 > - Discord/Slack: Optional, receives ALL alerts if configured
+> - **Active set changes require a verified verdict.** When no source can say
+>   whether the validator is in the active set (Huginn and gmonads both
+>   unreachable, no local evidence), the monitor holds the last known state
+>   instead of guessing "inactive" — that guess used to send a misleading
+>   `LEFT ACTIVE SET` and mute the active-only alerts until the sources
+>   recovered. Health, resource and network-timeout alerts keep working
+>   regardless. A deployment that disables both Huginn and gmonads therefore
+>   does not get active-set transitions at all; everything else is unaffected.
 
 ---
 
@@ -324,6 +332,10 @@ updates:
   enabled: true             # Set to false to disable
   check_interval: 604800    # Check frequency in seconds (default: weekly)
   image: "ghcr.io/mictonode/micto-monad-monitor"
+
+health_server:
+  port: 8181
+  staleness_threshold: 300  # Seconds without a check before /health returns 503
 ```
 
 The monitor checks the published image tags on GHCR weekly. When a newer release is found, it sends a notification **once** to Telegram, Discord and Slack (Pushover is excluded - reserved for critical alerts) with the update command.
@@ -630,17 +642,52 @@ micto-monad-monitor/
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /health` | Full health status (JSON) |
+| `GET /health` | Process freshness + validator status (JSON) |
 | `GET /ready` | Readiness probe |
 | `GET /live` | Liveness probe |
 | `GET /metrics` | Prometheus metrics |
+
+`/health` answers **"is the monitor loop still ticking?"**: it returns `200` while
+the monitor keeps checking, and `503` once the last check is older than
+`health_server.staleness_threshold` (default `300` seconds). Validator health is
+reported in the body, never in the status code — a validator having a bad minute
+must not mark the monitoring container itself as down, and any external watchdog
+(healthchecks.io, UptimeRobot, an orchestrator…) can be pointed at `/health` and
+read exactly what it says:
+
+```json
+{
+  "status": "healthy",              // validator aggregate: healthy | unhealthy | unknown
+  "freshness": "ok",                // ok | stale | unknown
+  "check_age_seconds": 1.4,         // seconds since the monitor loop last ticked
+  "uptime_seconds": 3600.5,
+  "version": "v1.7.8",
+  "validators": { "...": {} },
+  "alerts": {                       // per-channel delivery counters, visibility only
+    "telegram": {"sent": 12, "failed": 0, "consecutive_failures": 0},
+    "pushover": {"sent": 1, "failed": 0, "consecutive_failures": 0},
+    "discord": {"sent": 12, "failed": 0, "consecutive_failures": 0},
+    "slack": {"sent": 0, "failed": 0, "consecutive_failures": 0}
+  }
+}
+```
+
+The `alerts` block is how a silently dead channel becomes visible: only channels
+that are configured and actually attempted are counted, so a non-zero
+`failed` (or a growing `consecutive_failures`) on a channel that should be
+delivering alerts is the signal that the channel itself is broken.
 
 ### Monitor Dashboard (:8282)
 
 | Endpoint | Description |
 |----------|-------------|
 | `GET /` | Web dashboard UI |
-| `GET /health` | Health status (JSON) |
+| `GET /health` | Validator data + monitor freshness (JSON, always `200`) |
+
+This is the endpoint the web UI polls every 5 seconds, so it always answers
+`200`; it carries the same `freshness` / `check_age_seconds` fields as the health
+server, which makes it usable from outside as well (it is the endpoint exposed
+through a reverse proxy in a typical deployment).
 
 ### Metrics Dashboard (:8383)
 

@@ -7,11 +7,13 @@ Runs on port 8282 (separate from health_server on 8181).
 import asyncio
 import json
 import threading
+import time
 from pathlib import Path
 from typing import Dict, Any, Optional
 
 from aiohttp import web
 
+from .health_server import DEFAULT_STALENESS_THRESHOLD_SECONDS, freshness_state
 from .version_check import detect_version
 
 
@@ -45,6 +47,8 @@ class DashboardServer:
         self._validators_data: Dict[str, Dict[str, Any]] = {}
         self._monitor_status: str = "unknown"
         self._uptime_seconds: float = 0.0
+        self._last_check: float = time.time()  # monitor-loop heartbeat
+        self._staleness_threshold: float = DEFAULT_STALENESS_THRESHOLD_SECONDS
         self._version: str = detect_version()
         self._lock = threading.Lock()
 
@@ -80,13 +84,22 @@ class DashboardServer:
         )
 
     async def _get_health(self, request: web.Request) -> web.Response:
-        """Return JSON with validator data for dashboard consumption"""
+        """Return JSON with validator data for dashboard consumption
+
+        Always 200: this endpoint feeds the browser dashboard, which treats a
+        non-200 as "no data". Process freshness is reported in the body so an
+        external watchdog can read it from here too (the health_server on 8181
+        is the endpoint that turns staleness into a status code).
+        """
         with self._lock:
             data = {
                 "status": self._monitor_status,
                 "uptime_seconds": round(self._uptime_seconds, 2),
                 "version": self._version,
                 "validators": dict(self._validators_data),
+                "last_check": self._last_check,
+                "check_age_seconds": round(time.time() - self._last_check, 2),
+                "freshness": freshness_state(self._last_check, self._staleness_threshold),
             }
 
         return web.json_response(data)
@@ -126,6 +139,7 @@ class DashboardServer:
         validators: Dict[str, Dict[str, Any]],
         status: str = "healthy",
         uptime_seconds: float = 0.0,
+        loop_tick: Optional[float] = None,
     ) -> None:
         """
         Update the validator data for the /health endpoint.
@@ -134,11 +148,19 @@ class DashboardServer:
             validators: Dict of validator name -> {state, healthy, height, peers, fails, huginn_data, network, ...}
             status: Overall monitor status ("healthy", "unhealthy", "unknown")
             uptime_seconds: Monitor uptime in seconds
+            loop_tick: Monitor-loop heartbeat timestamp (None to keep current)
         """
         with self._lock:
-            self._validators_data = dict(validators)
+            # Copy each validator dict, not just the outer mapping: the monitor
+            # loop mutates its own per-validator dicts between iterations, and the
+            # aiohttp serializer runs outside this lock.
+            self._validators_data = {
+                name: dict(data) for name, data in validators.items()
+            }
             self._monitor_status = status
             self._uptime_seconds = uptime_seconds
+            if loop_tick is not None:
+                self._last_check = loop_tick
 
     def _create_app(self) -> web.Application:
         """Create and configure the aiohttp application"""

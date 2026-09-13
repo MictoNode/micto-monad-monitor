@@ -140,6 +140,18 @@ def validate_config(config: Dict[str, Any]) -> None:
             f"validator_set_warning ({validator_set_warning}) must be a boolean"
         )
 
+    # /health freshness threshold (seconds without a loop tick -> 503)
+    health_server = config.get("health_server", {})
+    staleness_threshold = health_server.get("staleness_threshold", 300)
+    if (
+        not isinstance(staleness_threshold, (int, float))
+        or isinstance(staleness_threshold, bool)
+        or staleness_threshold <= 0
+    ):
+        errors.append(
+            f"health_server.staleness_threshold ({staleness_threshold}) must be a number > 0"
+        )
+
     # Check thresholds
     thresholds = config.get("thresholds", {})
     cpu_warning = thresholds.get("cpu_warning", 90)

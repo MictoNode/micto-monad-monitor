@@ -1,11 +1,14 @@
 """Tests for AlertHandler and alert functionality"""
 
 import json
+import logging
+from unittest.mock import MagicMock
 
 import pytest
+import requests
 import responses
 
-from monad_monitor.alerts import AlertHandler
+from monad_monitor.alerts import AlertHandler, redact_error
 
 
 class TestAlertHandler:
@@ -953,6 +956,7 @@ class TestSlackWebhook:
             # Should have 3 calls (Telegram, Pushover, Slack)
             assert len(rsps.calls) == 3
 
+
     def test_slack_rate_limiting(self, handler_with_slack):
         """Test that Slack is rate limited for non-critical alerts"""
         # Exhaust rate limiter
@@ -1008,3 +1012,144 @@ class TestSlackWebhook:
 
             result = handler_with_slack.alert_critical("Critical message")
             assert result is True
+
+
+class TestAlertLogRedaction:
+    """Every channel keeps its credential inside the request URL, and requests
+    echoes that URL back in exception text - so send failures must be redacted."""
+
+    TELEGRAM_TOKEN = "123456:SECRET-BOT-TOKEN"
+    TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    DISCORD_URL = "https://discord.com/api/webhooks/111/SECRET-DISCORD-HOOK"
+    SLACK_URL = "https://hooks.slack.com/services/T1/B2/SECRET-SLACK-HOOK"
+
+    @pytest.fixture
+    def handler(self):
+        return AlertHandler(
+            telegram_token=self.TELEGRAM_TOKEN,
+            telegram_chat_id="test-chat-id",
+            pushover_user_key="user-key-secret",
+            pushover_app_token="app-token-secret",
+            discord_webhook_url=self.DISCORD_URL,
+            slack_webhook_url=self.SLACK_URL,
+        )
+
+    def _logged_text(self, caplog) -> str:
+        return "\n".join(record.getMessage() for record in caplog.records)
+
+    def test_redaction_covers_scheme_less_urls_and_literal_secrets(self):
+        scheme_less = (
+            "HTTPConnectionPool(host='api.telegram.org', port=443): Max retries "
+            "exceeded with url: /bot123456:SECRET-BOT-TOKEN/sendMessage"
+        )
+        assert "SECRET-BOT-TOKEN" not in redact_error(scheme_less, [])
+
+        with_scheme = f"400 Client Error for url: {self.DISCORD_URL}"
+        assert "SECRET-DISCORD-HOOK" not in redact_error(with_scheme, [])
+
+        assert "app-token-secret" not in redact_error(
+            "pushover token app-token-secret rejected", ["app-token-secret"]
+        )
+
+    def test_telegram_connection_error_keeps_the_token_out_of_the_log(
+        self, handler, monkeypatch, caplog
+    ):
+        connection_error = requests.exceptions.ConnectionError(
+            "HTTPConnectionPool(host='api.telegram.org', port=443): Max retries "
+            f"exceeded with url: /bot{self.TELEGRAM_TOKEN}/sendMessage "
+            "(Caused by NewConnectionError)"
+        )
+        monkeypatch.setattr(
+            "monad_monitor.alerts.requests.post",
+            MagicMock(side_effect=connection_error),
+        )
+
+        with caplog.at_level(logging.ERROR):
+            assert handler.send_telegram("Test message") is False
+
+        logged = self._logged_text(caplog)
+        assert self.TELEGRAM_TOKEN not in logged
+        assert "SECRET" not in logged
+        # The diagnostic value survives the redaction
+        assert "Max retries exceeded" in logged
+
+    def test_telegram_http_error_keeps_the_token_out_of_the_log(self, handler, caplog):
+        with responses.RequestsMock() as rsps:
+            rsps.add(responses.POST, self.TELEGRAM_URL, json={"ok": False}, status=400)
+
+            with caplog.at_level(logging.ERROR):
+                assert handler.send_telegram("Test message") is False
+
+        logged = self._logged_text(caplog)
+        assert self.TELEGRAM_TOKEN not in logged
+        assert "SECRET" not in logged
+        assert "400" in logged
+
+    def test_discord_and_slack_failures_do_not_log_their_hooks(self, handler, caplog):
+        with responses.RequestsMock() as rsps:
+            rsps.add(responses.POST, self.DISCORD_URL, json={}, status=404)
+            rsps.add(responses.POST, self.SLACK_URL, body="nope", status=500)
+
+            with caplog.at_level(logging.ERROR):
+                assert handler.send_discord("msg") is False
+                assert handler.send_slack("msg") is False
+
+        logged = self._logged_text(caplog)
+        assert "SECRET-DISCORD-HOOK" not in logged
+        assert "SECRET-SLACK-HOOK" not in logged
+
+
+class TestChannelDeliveryStats:
+    """Per-channel delivery counters (visibility, not alerting)"""
+
+    TELEGRAM_URL = "https://api.telegram.org/bottest-telegram-token/sendMessage"
+
+    @pytest.fixture
+    def handler(self):
+        return AlertHandler(
+            telegram_token="test-telegram-token",
+            telegram_chat_id="test-chat-id",
+        )
+
+    def test_counters_start_at_zero_for_every_channel(self, handler):
+        stats = handler.get_channel_stats()
+        assert set(stats) == {"telegram", "pushover", "discord", "slack"}
+        assert stats["telegram"] == {"sent": 0, "failed": 0, "consecutive_failures": 0}
+
+    def test_failures_accumulate_and_a_success_resets_the_streak(self, handler):
+        for _ in range(2):
+            with responses.RequestsMock() as rsps:
+                rsps.add(responses.POST, self.TELEGRAM_URL, json={}, status=500)
+                assert handler.send_telegram("msg") is False
+
+        stats = handler.get_channel_stats()["telegram"]
+        assert stats["failed"] == 2
+        assert stats["consecutive_failures"] == 2
+        assert stats["sent"] == 0
+
+        with responses.RequestsMock() as rsps:
+            rsps.add(responses.POST, self.TELEGRAM_URL, json={"ok": True}, status=200)
+            assert handler.send_telegram("msg") is True
+
+        assert handler.get_channel_stats()["telegram"] == {
+            "sent": 1,
+            "failed": 2,
+            "consecutive_failures": 0,
+        }
+
+    def test_unconfigured_channel_is_not_counted_as_failure(self):
+        handler = AlertHandler(telegram_token="t", telegram_chat_id="c")
+
+        assert handler.send_pushover("msg") is False
+
+        assert handler.get_channel_stats()["pushover"] == {
+            "sent": 0,
+            "failed": 0,
+            "consecutive_failures": 0,
+        }
+
+    def test_returned_stats_are_a_copy(self, handler):
+        stats = handler.get_channel_stats()
+        stats["telegram"]["sent"] = 99
+
+        assert handler.get_channel_stats()["telegram"]["sent"] == 0

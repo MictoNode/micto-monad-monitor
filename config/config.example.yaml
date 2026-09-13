@@ -81,6 +81,11 @@ health_server:
   enabled: true         # Enable/disable health server
   port: 8181            # Port for health server (NOT 8080 to avoid conflicts)
   host: "0.0.0.0"       # Bind address
+  # /health reports process freshness: 200 while the monitor loop keeps ticking,
+  # 503 once the last tick is older than this (seconds). Validator health is in
+  # the response body, not the status code, so a validator problem never marks
+  # the monitoring container itself as down.
+  staleness_threshold: 300
 
 # Dashboard Server Configuration
 # Web UI for real-time validator status monitoring
