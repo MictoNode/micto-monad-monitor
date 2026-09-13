@@ -189,6 +189,19 @@ def handle_huginn_timeout(
     return False
 
 
+def format_epoch_boundary_eta(boundary: float) -> str:
+    """Render a boundary timestamp as "in about 4h 14m, around 21:34 (local time)".
+
+    Times are naive-local, the convention the health reports already use (the
+    container's TZ env picks the zone).
+    """
+    remaining = max(0, int(boundary - time.time()))
+    hours, minutes = divmod(remaining // 60, 60)
+    delta = f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
+    local_time = datetime.fromtimestamp(boundary).strftime("%H:%M")
+    return f"in about {delta}, around {local_time} (local time)"
+
+
 def warn_if_leaving_next_epoch(
     enabled: bool,
     validator: ValidatorConfig,
@@ -197,8 +210,9 @@ def warn_if_leaving_next_epoch(
     validator_set: Optional[ValidatorSetState],
     huginn_client: Optional[HuginnClient],
     alerts: AlertHandler,
+    next_epoch_boundary: Optional[float] = None,
 ) -> bool:
-    """Warn once per epoch when a validator is set to leave the active set.
+    """Warn once per pending exit when a validator is set to leave the active set.
 
     The Huginn staking validator-set endpoint is the only forward-looking
     source: it lists the validators that are in the current consensus set but
@@ -212,11 +226,22 @@ def warn_if_leaving_next_epoch(
     - the combined active-set verdict is True (Huginn ``is_active``,
       overridden by gmonads on disagreement - the same verdict the state
       machine consumes);
-    - the epoch differs from the one already warned about.
+    - this pending exit has not been warned about yet.
+
+    The unit of dedup is the pending *exit*, not the epoch label Huginn happens
+    to report it under: an exit can span several epochs when a delay period
+    pushes the transition, and the label advances while the exit itself does
+    not, which used to replay the same warning once per epoch. The marker is
+    cleared only on positive evidence that the schedule is gone - the id is no
+    longer in the leaving list - so neither a label change nor a verdict that
+    flaps back to False around a boundary can re-announce the same exit.
+
+    `next_epoch_boundary` only names the exit time; without it - or while the
+    network is in a delay period, where the transition provably slips - the
+    message states the boundary without a clock time.
 
     Fail-open by design: missing/failed Huginn data skips the warning and
-    never raises. The warned epoch is remembered on the validator state so a
-    later check in the same epoch does not repeat the alert.
+    never raises.
 
     Returns:
         True if a warning was sent, False otherwise.
@@ -225,20 +250,36 @@ def warn_if_leaving_next_epoch(
         debug(f"{validator.name}: validator set warning disabled - skipping")
         return False
 
-    if validator_set is None:
-        debug(f"{validator.name}: validator set unavailable - skipping next-epoch exit warning")
-        return False
-
-    if is_active is not True:
-        debug(f"{validator.name}: not in active set (combined verdict) - skipping next-epoch exit warning")
-        return False
-
     network = validator.network or "testnet"
     validator_id = (
         huginn_client.get_validator_id(validator.validator_secp, network)
         if huginn_client
         else None
     )
+
+    # Episode bookkeeping. Only a leaving list that no longer names this
+    # validator proves the pending exit is over - the validator left the set,
+    # or the exit was called off. Unavailable data leaves the marker alone on
+    # purpose, so a transient False verdict around an epoch boundary cannot
+    # replay the warning for an exit that is still scheduled.
+    if (
+        validator_set is not None
+        and validator_id is not None
+        and not validator_set.is_leaving(validator_id)
+    ):
+        state["last_validator_set_warning_epoch"] = None
+
+    if is_active is not True:
+        if is_active is False:
+            debug(f"{validator.name}: not in active set (combined verdict) - skipping next-epoch exit warning")
+        else:
+            debug(f"{validator.name}: active-set verdict unknown - skipping next-epoch exit warning")
+        return False
+
+    if validator_set is None:
+        debug(f"{validator.name}: validator set unavailable - skipping next-epoch exit warning")
+        return False
+
     if validator_id is None:
         debug(f"{validator.name}: unresolved validator id on {network} - skipping next-epoch exit warning")
         return False
@@ -251,8 +292,11 @@ def warn_if_leaving_next_epoch(
         return False
 
     epoch = validator_set.epoch
-    if state.get("last_validator_set_warning_epoch") == epoch:
-        debug(f"{validator.name}: already warned about leaving in epoch {epoch} - skipping")
+    if state.get("last_validator_set_warning_epoch") is not None:
+        debug(
+            f"{validator.name}: next-epoch exit already announced "
+            f"(epoch {state['last_validator_set_warning_epoch']}, now {epoch}) - skipping"
+        )
         return False
 
     stake = next(
@@ -264,22 +308,30 @@ def warn_if_leaving_next_epoch(
         None,
     )
 
+    # The boundary is only named when it can be trusted: a delay period pushes
+    # the transition by definition, and there the estimate would point at the
+    # wrong boundary. Absent/unusable cadence data just drops the clock time.
+    eta = ""
+    if next_epoch_boundary is not None and not validator_set.in_delay_period:
+        eta = f" - {format_epoch_boundary_eta(next_epoch_boundary)}"
+
     message = (
         f"*{escape_markdown(validator.name)}*\n\n"
         f"⚠️ Leaving Active Set Next Epoch\n\n"
-        f"Huginn staking data: validator id {validator_id} is in the "
-        f"leaving list for epoch {epoch} (stake {stake})."
+        f"You are in the active set right now. On-chain staking data has "
+        f"validator id {validator_id} in the leaving list (stake {stake}), so "
+        f"the exit takes effect at the next epoch boundary{eta}."
     )
+    if validator_set.in_delay_period:
+        message += (
+            "\n\nThe network is in a delay period; the transition may slip"
+            " one further epoch."
+        )
     if (validator.network or "testnet").lower() == "testnet":
         message += (
             "\n\nNote: on testnet, active-set membership is rotated in batches by"
             " an automated rotation script; a leaving entry is often routine and"
             " typically reverses in a later epoch."
-        )
-    if validator_set.in_delay_period:
-        message += (
-            "\n\nThe network is in a delay period; the transition may slip"
-            " one further epoch."
         )
 
     alert_success = alerts.alert_warning(message)
@@ -291,6 +343,125 @@ def warn_if_leaving_next_epoch(
     info(
         f"⚠️ {validator.name}: leaving active set next epoch "
         f"(validator id {validator_id}, epoch {epoch}) - warning sent"
+    )
+    return True
+
+
+def notify_if_entering_next_epoch(
+    enabled: bool,
+    validator: ValidatorConfig,
+    state: Dict[str, Any],
+    is_active: Optional[bool],
+    validator_set: Optional[ValidatorSetState],
+    huginn_client: Optional[HuginnClient],
+    alerts: AlertHandler,
+    next_epoch_boundary: Optional[float] = None,
+) -> bool:
+    """Announce once per pending re-entry when the validator is queued back in.
+
+    Mirror of warn_if_leaving_next_epoch: the same staking validator-set names
+    the validators that are in the next epoch's snapshot but not in the current
+    consensus set, i.e. who is about to join. The pair brackets the lifecycle
+    the operator sees:
+
+        leaving next epoch  -> LEFT ACTIVE SET
+        entering next epoch -> RE-ENTERED ACTIVE SET
+
+    Sent as INFO (Telegram + Discord + Slack): a scheduled return is good news
+    and nothing is failing, the operator only has to be ready at the boundary.
+    Dedup works exactly like the exit notice - one announcement per pending
+    re-entry, cleared only once the id has left the entering list, so neither a
+    label change nor a flapping verdict can replay it.
+
+    The gate requires a definite inactive verdict: an unknown one (None) would
+    risk telling a validator that is in the active set that it is not.
+
+    Fail-open by design: missing/failed Huginn data skips the notice and never
+    raises.
+
+    Returns:
+        True if a notice was sent, False otherwise.
+    """
+    if not enabled:
+        debug(f"{validator.name}: re-entry notice disabled - skipping")
+        return False
+
+    network = validator.network or "testnet"
+    validator_id = (
+        huginn_client.get_validator_id(validator.validator_secp, network)
+        if huginn_client
+        else None
+    )
+
+    # Episode bookkeeping, same rule as the exit notice: the marker is only
+    # cleared when the entering list proves the pending return is over.
+    if (
+        validator_set is not None
+        and validator_id is not None
+        and not validator_set.is_entering(validator_id)
+    ):
+        state["last_validator_set_entry_notice_epoch"] = None
+
+    if is_active is not False:
+        if is_active is True:
+            debug(
+                f"{validator.name}: still in the active set (combined verdict) "
+                f"- skipping re-entry notice"
+            )
+        else:
+            debug(f"{validator.name}: active-set verdict unknown - skipping re-entry notice")
+        return False
+
+    if validator_set is None:
+        debug(f"{validator.name}: validator set unavailable - skipping re-entry notice")
+        return False
+
+    if validator_id is None:
+        debug(f"{validator.name}: unresolved validator id on {network} - skipping re-entry notice")
+        return False
+
+    if not validator_set.is_entering(validator_id):
+        debug(
+            f"{validator.name}: not in entering list for epoch {validator_set.epoch} "
+            f"- no re-entry notice"
+        )
+        return False
+
+    epoch = validator_set.epoch
+    if state.get("last_validator_set_entry_notice_epoch") is not None:
+        debug(
+            f"{validator.name}: re-entry already announced "
+            f"(epoch {state['last_validator_set_entry_notice_epoch']}, now {epoch}) - skipping"
+        )
+        return False
+
+    # Same rule as the exit notice: no clock time while a delay period can push
+    # the transition, and none without usable cadence data.
+    eta = ""
+    if next_epoch_boundary is not None and not validator_set.in_delay_period:
+        eta = f" - {format_epoch_boundary_eta(next_epoch_boundary)}"
+
+    message = (
+        f"*{escape_markdown(validator.name)}*\n\n"
+        f"🟢 Entering the Active Set Next Epoch\n\n"
+        f"You are not in the active set right now. On-chain staking data has "
+        f"validator id {validator_id} in the entering list, so the re-entry "
+        f"takes effect at the next epoch boundary{eta}."
+    )
+    if validator_set.in_delay_period:
+        message += (
+            "\n\nThe network is in a delay period; the transition may slip"
+            " one further epoch."
+        )
+
+    if not alerts.alert_info(message):
+        error(f"Failed to send re-entry notice for {validator.name}")
+        return False
+
+    state["last_validator_set_entry_notice_epoch"] = epoch
+    info(
+        f"🟢 {validator.name}: entering active set next epoch "
+        f"(validator id {validator_id}, epoch {epoch}) - notice sent"
     )
     return True
 
@@ -532,7 +703,8 @@ def main():
             "ts_fails": 0,  # Consecutive ts_validation_fail increases (separate from main fails)
             "ts_alert_active": False,  # Whether ts_validation_fail alert is currently active
             "last_huginn_timeout_count": None,  # Track Huginn timeout count (network-visible timeouts)
-            "last_validator_set_warning_epoch": None,  # Epoch of last next-epoch exit warning (M4)
+            "last_validator_set_warning_epoch": None,  # Epoch announced for the pending M4 exit (None = none announced)
+            "last_validator_set_entry_notice_epoch": None,  # Epoch announced for the pending re-entry (None = none announced)
         }
         # Sanitize validator name for filename (replace spaces and special chars)
         safe_name = v.name.replace(" ", "_").replace("/", "_").replace("\\", "_")
@@ -555,6 +727,11 @@ def main():
     # Next-epoch active set exit warning (Huginn staking data), on by default
     validator_set_warning_enabled = config["monitoring"].get("validator_set_warning", True)
 
+    # Next-epoch re-entry notice (the mirror of the exit warning), on by default
+    validator_set_entry_notice_enabled = config["monitoring"].get(
+        "validator_set_entry_notice", True
+    )
+
     # Send startup notification
     health_reporter.send_startup_report(validators)
     info(f"Monitor started - {len(validators)} validators | Log level: {log_level}")
@@ -568,6 +745,8 @@ def main():
             health_server_validators: Dict[str, Dict[str, Any]] = {}
             # Huginn staking validator set, fetched at most once per network per iteration
             validator_set_cache: Dict[str, Optional[ValidatorSetState]] = {}
+            # Boundary of the epoch each network's set describes (unix ts), same cadence
+            epoch_boundary_cache: Dict[str, Optional[float]] = {}
 
             for validator in validators:
                 if not running:
@@ -614,6 +793,25 @@ def main():
                         except Exception as e:
                             debug(f"Validator set fetch failed for {network}: {e}")
                             validator_set_cache[network] = None
+
+                    # Boundary ending the epoch the set above describes, used only
+                    # to name the exit time. Computed per network per cycle; the
+                    # client caches the cadence for hours, so this is at most one
+                    # request per epoch.
+                    if huginn_client and network not in epoch_boundary_cache:
+                        try:
+                            boundary_set = validator_set_cache.get(network)
+                            epoch_boundary_cache[network] = huginn_client.get_next_epoch_boundary(
+                                network, boundary_set.epoch if boundary_set else None
+                            )
+                        except Exception as e:
+                            debug(f"Next-epoch boundary unavailable for {network}: {e}")
+                            epoch_boundary_cache[network] = None
+                        else:
+                            debug(
+                                f"Epoch boundary for {network}: "
+                                f"{epoch_boundary_cache[network]}"
+                            )
 
                     # Update state with latest metrics
                     if health_status.metrics:
@@ -666,12 +864,21 @@ def main():
                                 and transition.to_state == ValidatorState.INACTIVE
                                 and huginn_client
                             ):
-                                alert_msg += entering_reentry_note(
+                                leaving_set = validator_set_cache.get(network)
+                                reentry_note = entering_reentry_note(
                                     huginn_client.get_validator_id(
                                         validator.validator_secp, network
                                     ),
-                                    validator_set_cache.get(network),
+                                    leaving_set,
                                 )
+                                alert_msg += reentry_note
+                                if reentry_note:
+                                    # This LEFT alert already carries the return,
+                                    # so the standalone re-entry notice must not
+                                    # repeat it for the same episode.
+                                    state["last_validator_set_entry_notice_epoch"] = (
+                                        leaving_set.epoch if leaving_set else None
+                                    )
                             alerts.alert_info(alert_msg)
                             info(f"State transition for {validator.name}: {transition.from_state.value} -> {transition.to_state.value}")
 
@@ -700,6 +907,20 @@ def main():
                         state=state,
                         is_active=health_status.is_active_validator,
                         validator_set=validator_set_cache.get(network),
+                        next_epoch_boundary=epoch_boundary_cache.get(network),
+                        huginn_client=huginn_client,
+                        alerts=alerts,
+                    )
+
+                    # Mirror notice: the same set names who is queued to join,
+                    # so a pending return is announced as far ahead as the exit.
+                    notify_if_entering_next_epoch(
+                        enabled=validator_set_entry_notice_enabled,
+                        validator=validator,
+                        state=state,
+                        is_active=health_status.is_active_validator,
+                        validator_set=validator_set_cache.get(network),
+                        next_epoch_boundary=epoch_boundary_cache.get(network),
                         huginn_client=huginn_client,
                         alerts=alerts,
                     )

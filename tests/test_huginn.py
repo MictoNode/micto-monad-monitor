@@ -2,6 +2,7 @@
 
 import logging
 import time
+from datetime import datetime, timezone
 
 import pytest
 import responses
@@ -1370,3 +1371,131 @@ class TestValidatorSet:
 
             assert client.get_validator_id("0xccc", network="testnet") == 5
             assert client._secp_id_complete.get("testnet") is False
+
+
+class TestEpochCadence:
+    """HuginnClient.get_next_epoch_boundary: naming when the next epoch starts"""
+
+    # Live cadence on both networks (epoch snapshots are 4h14m apart)
+    DURATION = 15240
+
+    @pytest.fixture
+    def client(self):
+        return HuginnClient(config=HuginnConfig())
+
+    @pytest.fixture
+    def uptime_url(self):
+        return f"{TESTNET_API}/validators/network/uptime?period=30d"
+
+    def payload(self, newest_epoch=1244, newest_ts=None, duration=None, rows=2):
+        """Real /validators/network/uptime shape, anchored to the wall clock.
+
+        `snapshot_ts` is written when an epoch ends, so the newest row doubles
+        as the start of the epoch after it.
+        """
+        duration = self.DURATION if duration is None else duration
+        newest_ts = time.time() - 100 if newest_ts is None else newest_ts
+        return {
+            "success": True,
+            "period": "30d",
+            "epochs": [
+                {
+                    "epoch": newest_epoch - index,
+                    "validator_count": 206,
+                    "finalized_count": 50038,
+                    "timeout_count": 201,
+                    "total_events": 50239,
+                    "uptime_percent": 99.6,
+                    "below_threshold": 1,
+                    "snapshot_ts": newest_ts - index * duration,
+                    "snapshot_utc": datetime.fromtimestamp(
+                        newest_ts - index * duration, timezone.utc
+                    ).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+                }
+                for index in range(rows)
+            ],
+        }
+
+    def test_boundary_named_for_the_current_epoch(self, client, uptime_url):
+        newest_ts = time.time() - 100
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.GET,
+                uptime_url,
+                json=self.payload(newest_ts=newest_ts),
+                status=200,
+            )
+
+            boundary = client.get_next_epoch_boundary("testnet", 1245)
+
+            assert boundary == pytest.approx(newest_ts + self.DURATION)
+
+    def test_boundary_counts_the_rows_the_cadence_lags_behind(self, client, uptime_url):
+        """A row that has not been written yet must not shift the boundary earlier."""
+        newest_ts = time.time() - 100
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.GET,
+                uptime_url,
+                json=self.payload(newest_ts=newest_ts),
+                status=200,
+            )
+
+            boundary = client.get_next_epoch_boundary("testnet", 1246)
+
+            assert boundary == pytest.approx(newest_ts + 2 * self.DURATION)
+
+    def test_boundary_none_when_cadence_lags_too_far(self, client, uptime_url):
+        with responses.RequestsMock() as rsps:
+            rsps.add(responses.GET, uptime_url, json=self.payload(), status=200)
+
+            assert client.get_next_epoch_boundary("testnet", 1244 + 10) is None
+
+    def test_boundary_none_when_epoch_is_missing_or_bogus(self, client, uptime_url):
+        with responses.RequestsMock() as rsps:
+            rsps.add(responses.GET, uptime_url, json=self.payload(), status=200)
+
+            assert client.get_next_epoch_boundary("testnet", None) is None
+            assert client.get_next_epoch_boundary("testnet", "1245") is None
+            assert client.get_next_epoch_boundary("testnet", 1240) is None  # older than the row
+
+    def test_boundary_none_when_the_estimate_is_in_the_past(self, client, uptime_url):
+        """Stale rows would otherwise predict a boundary that already happened."""
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.GET,
+                uptime_url,
+                json=self.payload(newest_ts=time.time() - 4 * self.DURATION),
+                status=200,
+            )
+
+            assert client.get_next_epoch_boundary("testnet", 1245) is None
+
+    def test_cadence_is_cached_across_calls(self, client, uptime_url):
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.GET,
+                uptime_url,
+                json=self.payload(newest_ts=time.time() - 100),
+                status=200,
+            )
+
+            first = client.get_next_epoch_boundary("testnet", 1245)
+            second = client.get_next_epoch_boundary("testnet", 1245)
+
+            assert first == second
+            assert len(rsps.calls) == 1
+
+    def test_cadence_failure_is_fail_open(self, client, uptime_url):
+        """Unreachable endpoint must drop the estimate, never raise."""
+        with responses.RequestsMock() as rsps:
+            rsps.add(responses.GET, uptime_url, status=500)
+
+            assert client.get_next_epoch_boundary("testnet", 1245) is None
+
+    def test_cadence_ignores_rows_without_a_timestamp(self, client, uptime_url):
+        payload = {"success": True, "epochs": [{"epoch": 1244}, {"epoch": 1243}]}
+        with responses.RequestsMock() as rsps:
+            rsps.add(responses.GET, uptime_url, json=payload, status=200)
+
+            assert client.get_next_epoch_boundary("testnet", 1245) is None

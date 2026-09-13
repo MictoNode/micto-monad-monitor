@@ -96,7 +96,8 @@ You should get a **"Monad Monitor Started"** message on your configured alert ch
 | **High Resources (Warning)** | CPU/RAM ≥ 90%, disk ≥ 85% | Telegram + Discord + Slack |
 | **NVMe Wear** | Wear ≥ 70% (warning) or ≥ 95% (critical), from node_exporter SMART metrics | Warning → Telegram + Discord + Slack; Critical → Telegram + Pushover + Discord + Slack |
 | **Active Set Changes** | Enters or leaves the active set; the LEFT message notes when the validator is already queued to return at the next epoch | Telegram + Discord + Slack |
-| **Active Set Exit Warning** | Your validator is listed to leave the active set at the next epoch (`monitoring.validator_set_warning`, on by default). On testnet the message notes that rotation is routine and often reverses | Telegram + Discord + Slack |
+| **Active Set Exit Warning** | Your validator is listed to leave the active set at the next epoch boundary (`monitoring.validator_set_warning`, on by default). Sent once per pending exit, with the expected exit time when it can be derived - the time is left out while the network is in a delay period, because the transition slips by definition. On testnet the message notes that rotation is routine and often reverses | Telegram + Discord + Slack |
+| **Active Set Entry Notice** | Your validator is queued to (re)join the active set at the next epoch boundary (`monitoring.validator_set_entry_notice`, on by default). Sent once per pending return, with the expected time when it can be derived. A return already announced inside a LEFT alert is not announced again | Telegram + Discord + Slack |
 | **Channel Degraded** | An alert channel keeps failing; you are warned through the channels that still work | Telegram + Discord + Slack |
 | **Recovery** | Validator back online | Telegram + Discord + Slack |
 | **Extended Report** | 6-hour detailed report with 24h, 30d and all-time uptime | Telegram + Discord + Slack |
@@ -321,6 +322,7 @@ monitoring:
   alert_threshold: 3           # Failures before alerting
   huginn_timeout_alert_threshold: 3  # Min missed rounds seen by network before CRITICAL (per check window)
   validator_set_warning: true  # WARN when Huginn staking data shows your validator leaving the active set next epoch
+  validator_set_entry_notice: true  # INFO when Huginn staking data shows your validator queued to re-enter next epoch
   extended_report_interval: 21600  # 6-hour detailed report
 
 thresholds:
