@@ -1,6 +1,6 @@
 # Monad Validator Monitor
 
-[![Version](https://img.shields.io/badge/version-1.8.0-8B5CF6?style=flat-square)](https://github.com/MictoNode/micto-monad-monitor)
+[![Version](https://img.shields.io/badge/version-1.8.1-8B5CF6?style=flat-square)](https://github.com/MictoNode/micto-monad-monitor)
 [![Python](https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docker.com)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
@@ -684,7 +684,7 @@ UptimeRobot, an orchestrator) at `/health` and it means what it says:
   "freshness": "ok",                // ok | stale | unknown
   "check_age_seconds": 0.8,         // seconds since the last check
   "uptime_seconds": 3600.5,
-  "version": "v1.8.0",
+  "version": "v1.8.1",
   "validators": { "...": {} },
   "alerts": {                       // per-channel delivery counters
     "telegram": {"sent": 12, "failed": 0, "consecutive_failures": 0},
