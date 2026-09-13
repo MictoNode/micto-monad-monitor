@@ -162,6 +162,29 @@ def warn_if_leaving_next_epoch(
     return True
 
 
+def entering_reentry_note(
+    validator_id: Optional[int],
+    validator_set: Optional[ValidatorSetState],
+) -> str:
+    """Return a re-entry note for a LEFT alert when the validator is queued back in.
+
+    The Huginn staking validator-set entering list is the forward-looking source
+    for returns: a validator that just left the active set but appears there is
+    scheduled to come back at the next epoch boundary (routine on testnet, where
+    an automated rotation script cycles validators). Missing data returns "" so
+    the LEFT alert is sent unchanged.
+    """
+    if validator_set is None or validator_id is None:
+        return ""
+    if not validator_set.is_entering(validator_id):
+        return ""
+    return (
+        "\n\nℹ️ The validator is in the entering list for the next epoch"
+        f" (epoch {validator_set.epoch}) - expected to return at the next"
+        " epoch boundary."
+    )
+
+
 def signal_handler(sig, frame):
     """Handle shutdown signals gracefully"""
     global running
@@ -425,6 +448,18 @@ def main():
                 state["last_execution_lagging"] = current_execution_lagging
                 state["last_ts_validation_fail"] = current_ts_validation_fail
 
+                # Huginn staking validator set, fetched at most once per
+                # VALIDATOR_SET_CACHE_TTL per network (client-side cache).
+                # Needed both for the next-epoch exit warning and for the
+                # re-entry note on LEFT alerts.
+                network = validator.network or "testnet"
+                if huginn_client and network not in validator_set_cache:
+                    try:
+                        validator_set_cache[network] = huginn_client.get_validator_set(network)
+                    except Exception as e:
+                        debug(f"Validator set fetch failed for {network}: {e}")
+                        validator_set_cache[network] = None
+
                 # Update state with latest metrics
                 if health_status.metrics:
                     state["last_height"] = health_status.block_height
@@ -480,6 +515,17 @@ def main():
                     # Handle state transitions with alerts (Telegram + Discord)
                     if transition and transition.is_significant():
                         alert_msg = transition.get_alert_message()
+                        if (
+                            transition.from_state == ValidatorState.ACTIVE
+                            and transition.to_state == ValidatorState.INACTIVE
+                            and huginn_client
+                        ):
+                            alert_msg += entering_reentry_note(
+                                huginn_client.get_validator_id(
+                                    validator.validator_secp, network
+                                ),
+                                validator_set_cache.get(network),
+                            )
                         alerts.alert_info(alert_msg)
                         info(f"State transition for {validator.name}: {transition.from_state.value} -> {transition.to_state.value}")
 
@@ -520,20 +566,8 @@ def main():
                         debug(f"Huginn unavailable for {validator.name}, relying on gmonads and local metrics")
 
                 # M4: warn once per epoch when this validator is set to leave
-                # the active set next epoch. The validator set is fetched at
-                # most once per network per iteration (see validator_set_cache).
-                network = validator.network or "testnet"
-                if validator_set_warning_enabled and network not in validator_set_cache:
-                    try:
-                        validator_set_cache[network] = (
-                            huginn_client.get_validator_set(network)
-                            if huginn_client
-                            else None
-                        )
-                    except Exception as e:
-                        debug(f"Validator set fetch failed for {network}: {e}")
-                        validator_set_cache[network] = None
-
+                # the active set next epoch, using the validator set fetched
+                # earlier in this iteration.
                 warn_if_leaving_next_epoch(
                     enabled=validator_set_warning_enabled,
                     validator=validator,
