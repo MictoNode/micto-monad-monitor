@@ -1116,6 +1116,23 @@ class TestValidatorSet:
             assert state.is_leaving(224) is False
             assert state.is_leaving(None) is False
 
+    def test_entering_ids_are_detected(self, client, validator_set_url):
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.GET,
+                validator_set_url,
+                json=SAMPLE_VALIDATOR_SET_RESPONSE,
+                status=200,
+            )
+
+            state = client.get_validator_set("testnet")
+
+            assert state.entering_ids == {231}
+            assert state.entering[0]["name"] == "Example"
+            assert state.is_entering(231) is True
+            assert state.is_entering(67) is False
+            assert state.is_entering(None) is False
+
     def test_validator_set_cached_per_network(self, client, validator_set_url):
         with responses.RequestsMock() as rsps:
             rsps.add(

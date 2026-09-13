@@ -168,7 +168,9 @@ class ValidatorSetState:
     `leaving` is the actionable part: validators in the current consensus set
     that are NOT in the next epoch's snapshot set, i.e. who is about to drop
     out. It carries only validator_id/name/stake - no secp - so callers match
-    against their own validator through get_validator_id().
+    against their own validator through get_validator_id(). `entering` is the
+    symmetric forward-looking signal: validators in the next epoch's snapshot
+    set that are not in the current consensus set.
     """
     network: str
     epoch: Optional[int]
@@ -177,10 +179,16 @@ class ValidatorSetState:
     leaving_ids: set
     leaving: List[Dict[str, Any]]
     fetched_at: float
+    entering_ids: set = field(default_factory=set)
+    entering: List[Dict[str, Any]] = field(default_factory=list)
 
     def is_leaving(self, validator_id: Optional[int]) -> bool:
         """Whether the given validator id is set to leave next epoch"""
         return validator_id is not None and validator_id in self.leaving_ids
+
+    def is_entering(self, validator_id: Optional[int]) -> bool:
+        """Whether the given validator id is queued to enter next epoch"""
+        return validator_id is not None and validator_id in self.entering_ids
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""
@@ -190,6 +198,7 @@ class ValidatorSetState:
             "in_delay_period": self.in_delay_period,
             "counts": dict(self.counts),
             "leaving": list(self.leaving),
+            "entering": list(self.entering),
             "fetched_at": self.fetched_at,
         }
 
@@ -744,6 +753,15 @@ class HuginnClient:
             if isinstance(entry, dict) and entry.get("validator_id") is not None
         }
 
+        entering = data.get("entering") or []
+        if not isinstance(entering, list):
+            entering = []
+        entering_ids = {
+            entry.get("validator_id")
+            for entry in entering
+            if isinstance(entry, dict) and entry.get("validator_id") is not None
+        }
+
         counts = data.get("counts") or {}
         return ValidatorSetState(
             network=network,
@@ -753,6 +771,8 @@ class HuginnClient:
             leaving_ids=leaving_ids,
             leaving=[entry for entry in leaving if isinstance(entry, dict)],
             fetched_at=time.time(),
+            entering_ids=entering_ids,
+            entering=[entry for entry in entering if isinstance(entry, dict)],
         )
 
     def get_validator_id(
