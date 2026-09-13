@@ -732,6 +732,8 @@ through a reverse proxy in a typical deployment).
 
 **Prometheus retention:** the bundled instance keeps 30 days **or** 5 GB, whichever limit is hit first (`docker-compose.yaml`). On a busy deployment the size cap can cut the window short — scale `--storage.tsdb.retention.size` to the `prometheus-data` volume if you rely on the 1w/1mo ranges.
 
+**Prometheus version:** the bundled image is pinned (`prom/prometheus:v3.14.0`) so that `docker compose pull` can never upgrade Prometheus by surprise — an unintended jump rewrites the TSDB format under a data directory that is already in use. Upgrading is supported (and forward-compatible): bump the tag deliberately. If your install already runs a **newer** Prometheus than the pinned tag, keep your own tag instead — handing the data directory to an older binary makes it refuse to start.
+
 ---
 
 ## External APIs
