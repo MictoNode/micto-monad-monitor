@@ -21,6 +21,11 @@ class MetricsScraper:
         self.metrics_url = metrics_url
         self.rpc_url = rpc_url
         self.timeout = timeout
+        # Episode dedup for the active-set disagreement warning: Huginn flips
+        # before gmonads at every epoch boundary, so this can repeat for
+        # several consecutive checks. One WARNING on entry, DEBUG afterwards,
+        # reset when the sources agree (or gmonads is unavailable) again.
+        self._active_set_disagreement_active = False
 
     def fetch_metrics(self) -> Optional[str]:
         """Fetch metrics from remote Prometheus endpoint"""
@@ -385,14 +390,28 @@ class MetricsScraper:
                             validator_secp, network
                         )
                         if gmonads_is_active is not None and gmonads_is_active != uptime.is_active:
-                            logger.warning(
+                            detail = (
                                 "Active set sources disagree for %s... on %s: "
-                                "Huginn=%s, gmonads=%s. Using gmonads current epoch.",
-                                validator_secp[:16],
-                                network,
-                                uptime.is_active,
-                                gmonads_is_active,
+                                "Huginn=%s, gmonads=%s. Using gmonads current epoch."
                             )
+                            if not self._active_set_disagreement_active:
+                                logger.warning(
+                                    detail
+                                    + " (further checks log at DEBUG until sources agree)",
+                                    validator_secp[:16],
+                                    network,
+                                    uptime.is_active,
+                                    gmonads_is_active,
+                                )
+                                self._active_set_disagreement_active = True
+                            else:
+                                logger.debug(
+                                    detail,
+                                    validator_secp[:16],
+                                    network,
+                                    uptime.is_active,
+                                    gmonads_is_active,
+                                )
                             return {
                                 **huginn_result,
                                 "is_active": gmonads_is_active,
@@ -402,6 +421,7 @@ class MetricsScraper:
                                 ),
                                 "source": "gmonads_api",
                             }
+                        self._active_set_disagreement_active = False
 
                     return huginn_result
                 else:

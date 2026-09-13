@@ -1,5 +1,7 @@
 """Tests for MetricsScraper and metric parsing"""
 
+import logging
+
 import pytest
 import responses
 
@@ -627,3 +629,59 @@ class TestNvmeMetrics:
             result = scraper.get_system_metrics("http://test:9100/metrics")
         assert "nvme" in result
         assert result["nvme"]["nvme_wear"]["nvme1n1"] == 1.0
+
+
+class TestActiveSetDisagreementLogging:
+    """Disagreement spam: one WARNING per episode, DEBUG repeats, reset on agreement"""
+
+    def setup_method(self):
+        self.scraper = MetricsScraper("http://metrics:8889/metrics", "http://rpc:8080")
+
+    def _check(self, huginn_active, gmonads_active):
+        from unittest.mock import MagicMock
+
+        mock_uptime = MagicMock()
+        mock_uptime.is_active = huginn_active
+        mock_uptime.total_events = 100
+        mock_uptime.uptime_percent = 99.9
+        mock_uptime.finalized_count = 99
+        mock_uptime.timeout_count = 1
+        mock_uptime.last_round = 1000
+        mock_uptime.last_block_height = 900
+        mock_uptime.to_dict.return_value = {"is_active": huginn_active}
+
+        mock_huginn = MagicMock()
+        mock_huginn.get_validator_uptime.return_value = mock_uptime
+        mock_gmonads = MagicMock()
+        mock_gmonads.is_validator_in_active_set.return_value = gmonads_active
+        return self.scraper.get_validator_status(
+            "0xabc", huginn_client=mock_huginn, network="testnet", gmonads_client=mock_gmonads
+        )
+
+    def _warning_count(self, caplog):
+        return sum(
+            1 for r in caplog.records
+            if r.levelno == logging.WARNING and "disagree" in r.getMessage()
+        )
+
+    def test_one_warning_per_disagreement_episode(self, caplog):
+        with caplog.at_level(logging.DEBUG, logger="monad_monitor.metrics"):
+            self._check(True, False)
+            self._check(True, False)
+            self._check(True, False)
+
+        assert self._warning_count(caplog) == 1
+
+    def test_agreement_resets_the_episode(self, caplog):
+        with caplog.at_level(logging.DEBUG, logger="monad_monitor.metrics"):
+            self._check(True, False)
+            self._check(True, True)  # sources agree again
+            self._check(True, False)  # new episode
+
+        assert self._warning_count(caplog) == 2
+
+    def test_verdict_still_follows_gmonads(self):
+        result = self._check(True, False)
+
+        assert result["is_active"] is False
+        assert result["source"] == "gmonads_api"
