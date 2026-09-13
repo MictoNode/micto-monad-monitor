@@ -1,19 +1,17 @@
-# Monad Validator Monitor - Python Dependencies
-requests>=2.31.0
-pyyaml>=6.0
-ecdsa>=0.19.0
-aiohttp>=3.9.0
+# Monad Validator Monitor - runtime dependencies
+#
+# Pinned to the versions the suite runs against. Transitive packages are left
+# floating on purpose: a lock generated on the dev interpreter (3.12) cannot be
+# replayed on the image's 3.11 without risking unresolvable pins. Test-only
+# packages live in requirements-dev.txt and never enter the image.
+requests==2.34.2
+pyyaml==6.0.3
+ecdsa==0.19.2
+aiohttp==3.14.3
 
 # Monitoring Dashboard
-fastapi>=0.115.0
-uvicorn[standard]>=0.34.0
-httpx>=0.28.0
-PyJWT>=2.10.0
-passlib[bcrypt]>=1.7.4
-cachetools>=5.5.0
-
-# Testing Dependencies
-pytest>=8.0.0
-pytest-asyncio>=0.23.0
-pytest-cov>=4.1.0
-responses>=0.24.0
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+httpx==0.28.1
+PyJWT==2.14.0
+cachetools==7.1.8

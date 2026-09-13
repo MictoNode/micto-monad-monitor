@@ -20,7 +20,6 @@ from .config import (
     ConfigValidationError,
     ValidatorConfig,
 )
-from .cross_validation import CrossValidator
 from .dashboard_server import DashboardServer
 from .gmonads import GmonadsClient
 from .health_report import HealthReporter
@@ -600,16 +599,13 @@ def main():
     else:
         info("gmonads API disabled - cross-validation and extended reports unavailable")
 
-    # Initialize cross-validator (requires both clients)
-    cross_validator = None
-    if huginn_client and gmonads_client:
-        cross_validator = CrossValidator(huginn_client, gmonads_client)
-        info("Cross-validation enabled - comparing Huginn and gmonads data")
-
     # Initialize API server for monitoring dashboard (optional)
     api_password = os.getenv("DASHBOARD_PASSWORD", "")
     api_jwt_secret = os.getenv("DASHBOARD_JWT_SECRET", "")
     api_port = int(os.getenv("API_PORT", "8383"))
+    # auto: mark the session cookie Secure whenever the browser reached us over
+    # HTTPS, directly or via a proxy reporting X-Forwarded-Proto
+    api_cookie_secure = os.getenv("DASHBOARD_COOKIE_SECURE", "auto").strip().lower()
     api_server = None
 
     if api_password and api_jwt_secret:
@@ -628,6 +624,7 @@ def main():
             jwt_secret=api_jwt_secret,
             validators_config=validators_list,
             port=api_port,
+            cookie_secure=api_cookie_secure,
         )
         api_server.start()
         info(f"API server started on 0.0.0.0:{api_port}")
@@ -660,7 +657,6 @@ def main():
 
     health_reporter = HealthReporter(
         alerts=alerts,
-        report_interval=config["monitoring"].get("health_report_interval", 3600),
         extended_report_interval=config["monitoring"].get("extended_report_interval", 21600),  # 6 hours
     )
 

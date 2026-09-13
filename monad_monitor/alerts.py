@@ -688,25 +688,6 @@ class AlertHandler:
         )
         return telegram_success or discord_success or slack_success
 
-    def alert_network(self, message: str) -> bool:
-        """Send network-wide alert (Telegram + Discord + Slack, rate limited)
-
-        Returns:
-            True if sent successfully to at least one channel, False otherwise
-        """
-        telegram_success = self.send_telegram(f"🌐 *NETWORK*\n\n{message}")
-        discord_success = self.send_discord(
-            message=message,
-            title="🌐 MONAD NETWORK",
-            color=0x9b59b6,  # Purple for network
-        )
-        slack_success = self.send_slack(
-            message=message,
-            title="🌐 MONAD NETWORK",
-            color="#9b59b6",
-        )
-        return telegram_success or discord_success or slack_success
-
     def get_critical_stats(self) -> dict:
         """Get statistics about critical alerts (for monitoring)"""
         return {

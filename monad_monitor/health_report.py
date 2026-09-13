@@ -14,43 +14,15 @@ class HealthReporter:
     def __init__(
         self,
         alerts: AlertHandler,
-        report_interval: int = 3600,
         extended_report_interval: int = 21600,  # 6 hours
     ):
         self.alerts = alerts
-        self.report_interval = report_interval
         self.extended_report_interval = extended_report_interval
-        self.last_report_time = 0
-        self.last_extended_report_time = 0
-
-    def maybe_send_report(
-        self,
-        validators: List[ValidatorConfig],
-        states: Dict[str, Dict],
-    ) -> bool:
-        """
-        Send health report if interval has elapsed.
-
-        NOTE: This method is currently not used in the main monitoring loop.
-        The main loop uses maybe_send_extended_report() instead, which provides
-        more detailed metrics. This method is kept for potential future use
-        cases where a simpler, lighter-weight report is needed.
-
-        Args:
-            validators: List of validator configurations
-            states: Current validator states
-
-        Returns:
-            True if report was sent, False otherwise
-        """
-        current_time = time.time()
-
-        if current_time - self.last_report_time < self.report_interval:
-            return False
-
-        self.last_report_time = current_time
-        self._send_report(validators, states)
-        return True
+        # Seeded at construction: the startup report is the "monitor is up"
+        # message, so the first extended report waits a full interval instead of
+        # firing on the first cycle right after a restart (which used to send
+        # both messages back to back).
+        self.last_extended_report_time = time.time()
 
     def maybe_send_extended_report(
         self,
@@ -79,74 +51,6 @@ class HealthReporter:
         self.last_extended_report_time = current_time
         self._send_extended_report(validators, states, metrics_data)
         return True
-
-    def _send_report(
-        self,
-        validators: List[ValidatorConfig],
-        states: Dict[str, Dict],
-    ) -> None:
-        """Generate and send health report"""
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        report_lines = [
-            f"📊 *Monad Health Report*",
-            f"⏰ {timestamp}",
-            "",
-        ]
-
-        healthy_count = 0
-        unhealthy_count = 0
-
-        for validator in validators:
-            state = states.get(validator.name, {})
-            is_healthy = not state.get("alert_active", False)
-
-            if is_healthy:
-                healthy_count += 1
-                status_emoji = "✅"
-            else:
-                unhealthy_count += 1
-                status_emoji = "❌"
-
-            report_lines.append(
-                f"{status_emoji} *{escape_markdown(validator.name)}*"
-            )
-            report_lines.append(f"   Host: `{escape_markdown(validator.host)}`")
-
-            # Add last known status
-            last_height = state.get("last_height")
-            last_peers = state.get("last_peers")
-
-            if last_height is not None:
-                report_lines.append(f"   Height: {int(last_height)}")
-            if last_peers is not None:
-                report_lines.append(f"   Peers: {int(last_peers)}")
-
-            report_lines.append("")
-
-        # Summary
-        report_lines.extend([
-            "━━━━━━━━━━━━━━━━━━━━",
-            f"📈 *Summary:*",
-            f"   ✅ Healthy: {healthy_count}",
-            f"   ❌ Unhealthy: {unhealthy_count}",
-        ])
-
-        report = "\n".join(report_lines)
-        plain_report = report.replace("*", "").replace("`", "")
-        self.alerts.send_telegram(report)
-        # Also send to Discord if configured
-        self.alerts.send_discord(
-            message=plain_report,
-            title="📊 Monad Health Report",
-            color=0x3498db,  # Blue
-        )
-        # Also send to Slack if configured
-        self.alerts.send_slack(
-            message=plain_report,
-            title="📊 Monad Health Report",
-            color="#3498db",
-        )
 
     def _send_extended_report(
         self,

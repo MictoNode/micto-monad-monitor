@@ -1,7 +1,9 @@
 """FastAPI backend for monitoring dashboard."""
+import hmac
 import math
 import threading
 import time
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -9,7 +11,37 @@ import cachetools
 import httpx
 import jwt
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.security import OAuth2PasswordBearer  # kept for backward compat
+
+from .logger import warning
+
+# Failed-login budget. The dashboard has a single shared password, so a per-IP
+# limit is close to useless (source addresses rotate for free, and a reverse
+# proxy already collapses every client onto one address) - the cap is global
+# instead, which fixes the number of guesses per window. It is consulted only
+# *after* the password is verified, so the operator's correct password always
+# gets through and an attacker can merely saturate their own guessing.
+LOGIN_FAILURE_LIMIT = 10
+LOGIN_FAILURE_WINDOW_SECONDS = 900
+
+# DASHBOARD_COOKIE_SECURE modes
+COOKIE_SECURE_MODES = ("auto", "always", "never")
+
+# The dashboard is one self-contained page: its only external origin is the
+# charting CDN, and it needs no framing, objects, or forms. 'unsafe-inline' is
+# required because the UI ships as a single inline <script> plus two onclick
+# attributes - so XSS mitigation is NOT among the gains here; nosniff, framing
+# and object/base restrictions, and pinning the script origin are.
+CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; "
+    "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "connect-src 'self'; "
+    "object-src 'none'; "
+    "frame-ancestors 'none'; "
+    "base-uri 'none'; "
+    "form-action 'self'"
+)
 
 
 def _safe_float(v) -> float | None:
@@ -22,7 +54,24 @@ def _safe_float(v) -> float | None:
 
 
 def verify_password(plain: str, stored: str) -> bool:
-    return plain == stored
+    """Compare the submitted password in constant time."""
+    return hmac.compare_digest(plain.encode("utf-8"), stored.encode("utf-8"))
+
+
+def request_is_https(request: Request) -> bool:
+    """Whether the browser reached us over HTTPS, honoring a proxy's header.
+
+    ``request.url.scheme`` cannot see through the reverse proxy in the shipped
+    deployment (uvicorn's trusted-proxy list is localhost while Docker NAT
+    rewrites the source address), so X-Forwarded-Proto is read directly.
+    Trusting that header can only harden the cookie: a spoofed "https" marks
+    the cookie Secure, which merely stops a plain-HTTP origin from storing it.
+    It can never downgrade an HTTPS session.
+    """
+    if request.url.scheme == "https":
+        return True
+    forwarded = request.headers.get("x-forwarded-proto", "")
+    return forwarded.split(",")[0].strip().lower() == "https"
 
 
 def create_access_token(secret: str, expires_delta: int = 86400) -> str:
@@ -329,9 +378,26 @@ class PrometheusClient:
             await self._client.close()
 
 
-def create_app(password: str, jwt_secret: str, prometheus_url: str, validators_config: list[dict]) -> FastAPI:
+def create_app(
+    password: str,
+    jwt_secret: str,
+    prometheus_url: str,
+    validators_config: list[dict],
+    cookie_secure: str = "auto",
+) -> FastAPI:
     app = FastAPI(title="Monad Monitor Dashboard API", docs_url=None, redoc_url=None)
     prom = PrometheusClient(prometheus_url)
+
+    # Per-app state (kept out of module scope so tests and reloads never share it)
+    login_failures: deque[float] = deque()
+    secure_mode = cookie_secure if cookie_secure in COOKIE_SECURE_MODES else "auto"
+    # The validator name is interpolated into a PromQL label matcher, so only the
+    # names from the operator's own config are allowed anywhere near a query.
+    allowed_validators = {
+        str(v["name"])
+        for v in (validators_config or [])
+        if isinstance(v, dict) and v.get("name")
+    }
 
     @app.middleware("http")
     async def _no_store_api_cache(request: Request, call_next):
@@ -344,6 +410,15 @@ def create_app(password: str, jwt_secret: str, prometheus_url: str, validators_c
             # The dashboard page ships the whole UI inline (styles + logic), so
             # an edge cache pinning an old copy would show a release-old design.
             response.headers["Cache-Control"] = "no-cache"
+        return response
+
+    @app.middleware("http")
+    async def _security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Content-Security-Policy", CONTENT_SECURITY_POLICY)
         return response
 
     def _get_current_user(request: Request) -> dict:
@@ -364,15 +439,51 @@ def create_app(password: str, jwt_secret: str, prometheus_url: str, validators_c
 
     @app.post("/api/auth/login")
     async def login(request: Request, response: Response):
-        body = await request.json()
-        pw = body.get("password", "")
+        try:
+            body = await request.json()
+        except Exception:
+            # A malformed body must not reach the (unauthenticated) 500 path and
+            # silently skip the failure accounting.
+            raise HTTPException(status_code=400, detail="Invalid JSON body")
+        pw = body.get("password") if isinstance(body, dict) else None
+        if not isinstance(pw, str):
+            raise HTTPException(status_code=400, detail="Missing password")
+
+        now = time.time()
         if not verify_password(pw, password):
+            login_failures.append(now)
+            while login_failures and now - login_failures[0] > LOGIN_FAILURE_WINDOW_SECONDS:
+                login_failures.popleft()
+            if len(login_failures) > LOGIN_FAILURE_LIMIT:
+                retry_after = int(
+                    LOGIN_FAILURE_WINDOW_SECONDS - (now - login_failures[0])
+                ) + 1
+                warning(
+                    f"Dashboard login throttled - {len(login_failures)} failed attempts "
+                    f"in {LOGIN_FAILURE_WINDOW_SECONDS // 60} min, retry in {retry_after}s"
+                )
+                raise HTTPException(
+                    status_code=429,
+                    detail="Too many failed attempts, try again later",
+                    headers={"Retry-After": str(retry_after)},
+                )
+            warning(
+                f"Failed dashboard login attempt ({len(login_failures)} in the "
+                f"current {LOGIN_FAILURE_WINDOW_SECONDS // 60} min window)"
+            )
             raise HTTPException(status_code=401, detail="Invalid password")
+
+        # Correct password: always allowed, and the failure counter is left as it
+        # is - a successful login must not hand an attacker a fresh budget.
         token = create_access_token(secret=jwt_secret)
         response.set_cookie(
             "jwt", token,
             httponly=True,
             samesite="strict",
+            secure=(
+                secure_mode == "always"
+                or (secure_mode == "auto" and request_is_https(request))
+            ),
             max_age=86400,
             path="/",
         )
@@ -416,6 +527,8 @@ def create_app(password: str, jwt_secret: str, prometheus_url: str, validators_c
 
     @app.get("/api/metrics/{validator_name}")
     async def get_metrics(validator_name: str, user: dict = Depends(_get_current_user)):
+        if validator_name not in allowed_validators:
+            raise HTTPException(status_code=404, detail="Unknown validator")
         metrics = {}
         for key, query_tpl in PROMETHEUS_QUERIES.items():
             query = query_tpl.format(name=validator_name)
@@ -431,6 +544,8 @@ def create_app(password: str, jwt_secret: str, prometheus_url: str, validators_c
 
     @app.get("/api/chart/{validator_name}/{metric_key}")
     async def get_chart(validator_name: str, metric_key: str, range: str = "1h", user: dict = Depends(_get_current_user)):
+        if validator_name not in allowed_validators:
+            raise HTTPException(status_code=404, detail="Unknown validator")
         query_tpl = PROMETHEUS_QUERIES.get(metric_key)
         if not query_tpl:
             raise HTTPException(status_code=404, detail=f"Unknown metric: {metric_key}")
@@ -454,12 +569,13 @@ def create_app(password: str, jwt_secret: str, prometheus_url: str, validators_c
 class APIServer:
     """Run FastAPI in a background daemon thread."""
 
-    def __init__(self, prometheus_url: str, password: str, jwt_secret: str, validators_config: list[dict], port: int = 8383):
+    def __init__(self, prometheus_url: str, password: str, jwt_secret: str, validators_config: list[dict], port: int = 8383, cookie_secure: str = "auto"):
         self.prometheus_url = prometheus_url
         self.password = password
         self.jwt_secret = jwt_secret
         self.validators_config = validators_config
         self.port = port
+        self.cookie_secure = cookie_secure
         self._thread: threading.Thread | None = None
         self._loop = None
 
@@ -475,6 +591,7 @@ class APIServer:
                 jwt_secret=self.jwt_secret,
                 prometheus_url=self.prometheus_url,
                 validators_config=self.validators_config,
+                cookie_secure=self.cookie_secure,
             )
             config = uvicorn.Config(app, host="0.0.0.0", port=self.port, log_level="warning")
             server = uvicorn.Server(config)

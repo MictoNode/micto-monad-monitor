@@ -199,35 +199,6 @@ class TestValidatorStateMachine:
         machine.update(is_active=False, is_ever_active=True)
         assert machine.get_alert_threshold() == "recovery"
 
-    def test_should_alert_local_timeout_new_validator(self):
-        """Test that local_timeout alerts are suppressed for NEW validators"""
-        machine = ValidatorStateMachine(validator_name="TestValidator")
-        assert machine.should_alert_on("local_timeout") is False
-
-    def test_should_alert_local_timeout_active_validator(self):
-        """Test that local_timeout alerts are enabled for ACTIVE validators"""
-        machine = ValidatorStateMachine(validator_name="TestValidator")
-        machine.update(is_active=True, is_ever_active=True)
-        assert machine.should_alert_on("local_timeout") is True
-
-    def test_should_alert_local_timeout_inactive_validator(self):
-        """Test that local_timeout alerts are suppressed for INACTIVE validators"""
-        machine = ValidatorStateMachine(validator_name="TestValidator")
-        machine.update(is_active=True, is_ever_active=True)
-        machine.update(is_active=False, is_ever_active=True)
-        assert machine.should_alert_on("local_timeout") is False
-
-    def test_should_alert_node_down_always_true(self):
-        """Test that node_down alerts are always enabled"""
-        machine = ValidatorStateMachine(validator_name="TestValidator")
-        assert machine.should_alert_on("node_down") is True
-
-        machine.update(is_active=True, is_ever_active=True)
-        assert machine.should_alert_on("node_down") is True
-
-        machine.update(is_active=False, is_ever_active=True)
-        assert machine.should_alert_on("node_down") is True
-
     def test_transition_history(self):
         """Test that transition history is tracked"""
         machine = ValidatorStateMachine(validator_name="TestValidator")

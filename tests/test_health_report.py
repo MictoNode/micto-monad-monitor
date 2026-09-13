@@ -25,11 +25,8 @@ class TestHealthReporter:
 
     @pytest.fixture
     def reporter(self, alert_handler):
-        """Create HealthReporter with short interval for testing"""
-        return HealthReporter(
-            alerts=alert_handler,
-            report_interval=1,  # 1 second for testing
-        )
+        """Create HealthReporter for testing"""
+        return HealthReporter(alerts=alert_handler)
 
     @pytest.fixture
     def sample_validators(self):
@@ -73,69 +70,9 @@ class TestHealthReporter:
             },
         }
 
-    def test_maybe_send_report_returns_false_before_interval(
-        self, reporter, sample_validators, sample_states
-    ):
-        """Test report not sent before interval elapses"""
-        # Set last report time to now so interval hasn't elapsed
-        reporter.last_report_time = time.time()
 
-        result = reporter.maybe_send_report(sample_validators, sample_states)
 
-        assert result is False
 
-    def test_maybe_send_report_returns_true_after_interval(
-        self, reporter, sample_validators, sample_states
-    ):
-        """Test report sent after interval elapses"""
-        with responses.RequestsMock() as rsps:
-            rsps.add(
-                responses.POST,
-                "https://api.telegram.org/bottest-telegram-token/sendMessage",
-                json={"ok": True},
-                status=200,
-            )
-            reporter.last_report_time = time.time() - 2  # 2 seconds ago
-
-            result = reporter.maybe_send_report(sample_validators, sample_states)
-
-            assert result is True
-
-    def test_send_report_includes_all_validators(
-        self, reporter, sample_validators, sample_states
-    ):
-        """Test report includes all validators"""
-        with responses.RequestsMock() as rsps:
-            rsps.add(
-                responses.POST,
-                "https://api.telegram.org/bottest-telegram-token/sendMessage",
-                json={"ok": True},
-                status=200,
-            )
-
-            reporter.maybe_send_report(sample_validators, sample_states)
-
-            request_body = rsps.calls[0].request.body
-            assert "validator-1" in str(request_body)
-            assert "validator-2" in str(request_body)
-
-    def test_send_report_shows_health_status(
-        self, reporter, sample_validators, sample_states
-    ):
-        """Test report shows healthy/unhealthy status"""
-        with responses.RequestsMock() as rsps:
-            rsps.add(
-                responses.POST,
-                "https://api.telegram.org/bottest-telegram-token/sendMessage",
-                json={"ok": True},
-                status=200,
-            )
-
-            reporter.maybe_send_report(sample_validators, sample_states)
-
-            request_body = rsps.calls[0].request.body
-            body_str = str(request_body)
-            assert "Summary" in body_str or "Healthy" in body_str or "Unhealthy" in body_str
 
     def test_send_startup_report(self, reporter, sample_validators):
         """Test startup report is sent correctly"""
@@ -169,23 +106,6 @@ class TestHealthReporter:
             request_body = rsps.calls[0].request.body
             assert "Stopped" in str(request_body) or "stopped" in str(request_body).lower()
 
-    def test_report_updates_last_report_time(
-        self, reporter, sample_validators, sample_states
-    ):
-        """Test that last_report_time is updated after sending"""
-        with responses.RequestsMock() as rsps:
-            rsps.add(
-                responses.POST,
-                "https://api.telegram.org/bottest-telegram-token/sendMessage",
-                json={"ok": True},
-                status=200,
-            )
-            original_time = reporter.last_report_time
-            reporter.last_report_time = time.time() - 2
-
-            reporter.maybe_send_report(sample_validators, sample_states)
-
-            assert reporter.last_report_time > original_time
 
 
 class TestHealthReporterExtendedReport:
@@ -204,7 +124,6 @@ class TestHealthReporterExtendedReport:
         """Create HealthReporter with extended report capability"""
         return HealthReporter(
             alerts=alert_handler,
-            report_interval=3600,
             extended_report_interval=1,  # 1 second for testing
         )
 
@@ -238,7 +157,6 @@ class TestHealthReporterExtendedReport:
     def test_extended_report_interface_exists(self, reporter):
         """Verify extended report interface can be added"""
         assert hasattr(reporter, "alerts")
-        assert hasattr(reporter, "report_interval")
         assert hasattr(reporter, "extended_report_interval")
         assert hasattr(reporter, "maybe_send_extended_report")
 
@@ -246,12 +164,17 @@ class TestHealthReporterExtendedReport:
         """Test extended report configuration can be set"""
         reporter = HealthReporter(
             alerts=alert_handler,
-            report_interval=3600,
             extended_report_interval=21600,  # 6 hours
         )
 
-        assert reporter.report_interval == 3600
         assert reporter.extended_report_interval == 21600
+
+    def test_no_extended_report_immediately_after_construction(self, alert_handler):
+        """The startup report owns the \"monitor is up\" message: a restart must not
+        also fire an extended report on the first cycle."""
+        reporter = HealthReporter(alerts=alert_handler, extended_report_interval=21600)
+
+        assert reporter.maybe_send_extended_report([], {}) is False
 
     def test_extended_report_returns_false_before_interval(
         self, reporter, sample_validators, sample_states

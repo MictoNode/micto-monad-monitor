@@ -3,7 +3,7 @@ import math
 
 import pytest
 
-from monad_monitor.api_server import _safe_float
+from monad_monitor.api_server import LOGIN_FAILURE_LIMIT, _safe_float
 
 
 class TestSafeFloat:
@@ -37,11 +37,12 @@ class TestSafeFloat:
 class TestAuth:
     """Test JWT authentication."""
 
-    def test_password_hashing(self):
-        """bcrypt password verification works."""
+    def test_password_comparison_constant_time(self):
+        """The configured password is compared in constant time (no bcrypt involved)."""
         from monad_monitor.api_server import verify_password
         assert verify_password("testpass", "testpass") is True
         assert verify_password("wrong", "testpass") is False
+        assert verify_password("", "testpass") is False
 
     def test_jwt_create_and_verify(self):
         """JWT token creation and validation."""
@@ -73,7 +74,8 @@ class TestAuth:
         """Login with correct password returns token."""
         from fastapi.testclient import TestClient
         from monad_monitor.api_server import create_app
-        app = create_app(password="testpass", jwt_secret="secret", prometheus_url="http://localhost:9090", validators_config=[])
+        app = create_app(password="testpass", jwt_secret="secret", prometheus_url="http://localhost:9090",
+            validators_config=[{"name": "TestVal", "host": "1.2.3.4", "network": "testnet"}])
         client = TestClient(app)
         response = client.post("/api/auth/login", json={"password": "testpass"})
         assert response.status_code == 200
@@ -85,7 +87,8 @@ class TestAuth:
         """Login with wrong password returns 401."""
         from fastapi.testclient import TestClient
         from monad_monitor.api_server import create_app
-        app = create_app(password="testpass", jwt_secret="secret", prometheus_url="http://localhost:9090", validators_config=[])
+        app = create_app(password="testpass", jwt_secret="secret", prometheus_url="http://localhost:9090",
+            validators_config=[{"name": "TestVal", "host": "1.2.3.4", "network": "testnet"}])
         client = TestClient(app)
         response = client.post("/api/auth/login", json={"password": "wrongpass"})
         assert response.status_code == 401
@@ -94,7 +97,8 @@ class TestAuth:
         """Protected endpoint returns 401 without token."""
         from fastapi.testclient import TestClient
         from monad_monitor.api_server import create_app
-        app = create_app(password="testpass", jwt_secret="secret", prometheus_url="http://localhost:9090", validators_config=[])
+        app = create_app(password="testpass", jwt_secret="secret", prometheus_url="http://localhost:9090",
+            validators_config=[{"name": "TestVal", "host": "1.2.3.4", "network": "testnet"}])
         client = TestClient(app)
         response = client.get("/api/validators")
         assert response.status_code == 401
@@ -103,7 +107,8 @@ class TestAuth:
         """Protected endpoint returns 200 with valid token."""
         from fastapi.testclient import TestClient
         from monad_monitor.api_server import create_app
-        app = create_app(password="testpass", jwt_secret="secret", prometheus_url="http://localhost:9090", validators_config=[])
+        app = create_app(password="testpass", jwt_secret="secret", prometheus_url="http://localhost:9090",
+            validators_config=[{"name": "TestVal", "host": "1.2.3.4", "network": "testnet"}])
         client = TestClient(app)
         login = client.post("/api/auth/login", json={"password": "testpass"})
         token = login.json()["access_token"]
@@ -114,7 +119,8 @@ class TestAuth:
         """Health endpoint works without authentication."""
         from fastapi.testclient import TestClient
         from monad_monitor.api_server import create_app
-        app = create_app(password="testpass", jwt_secret="secret", prometheus_url="http://localhost:9090", validators_config=[])
+        app = create_app(password="testpass", jwt_secret="secret", prometheus_url="http://localhost:9090",
+            validators_config=[{"name": "TestVal", "host": "1.2.3.4", "network": "testnet"}])
         client = TestClient(app)
         response = client.get("/api/health")
         assert response.status_code == 200
@@ -256,25 +262,29 @@ class TestTimeRange:
         """/api/chart/ accepts ?range= param without error."""
         from fastapi.testclient import TestClient
         from monad_monitor.api_server import create_app
-        app = create_app(password="testpass", jwt_secret="secret", prometheus_url="http://localhost:9090", validators_config=[])
+        app = create_app(password="testpass", jwt_secret="secret", prometheus_url="http://localhost:9090",
+            validators_config=[{"name": "TestVal", "host": "1.2.3.4", "network": "testnet"}])
         client = TestClient(app)
         login = client.post("/api/auth/login", json={"password": "testpass"})
         token = login.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
         response = client.get("/api/chart/TestVal/nonexistent?range=5m", headers=headers)
         assert response.status_code == 404  # metric not found, but range accepted
+        assert "Unknown metric" in response.json()["detail"]
 
     def test_chart_endpoint_default_range_no_crash(self):
         """/api/chart/ works without range param (backward compatible)."""
         from fastapi.testclient import TestClient
         from monad_monitor.api_server import create_app
-        app = create_app(password="testpass", jwt_secret="secret", prometheus_url="http://localhost:9090", validators_config=[])
+        app = create_app(password="testpass", jwt_secret="secret", prometheus_url="http://localhost:9090",
+            validators_config=[{"name": "TestVal", "host": "1.2.3.4", "network": "testnet"}])
         client = TestClient(app)
         login = client.post("/api/auth/login", json={"password": "testpass"})
         token = login.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
         response = client.get("/api/chart/TestVal/nonexistent", headers=headers)
         assert response.status_code == 404  # same behavior, no crash
+        assert "Unknown metric" in response.json()["detail"]
 
 
 class TestRangeCache:
@@ -354,7 +364,8 @@ class TestRangeCache:
         """All /api/* responses carry Cache-Control: no-store."""
         from fastapi.testclient import TestClient
         from monad_monitor.api_server import create_app
-        app = create_app(password="testpass", jwt_secret="secret", prometheus_url="http://localhost:9090", validators_config=[])
+        app = create_app(password="testpass", jwt_secret="secret", prometheus_url="http://localhost:9090",
+            validators_config=[{"name": "TestVal", "host": "1.2.3.4", "network": "testnet"}])
         client = TestClient(app)
         login = client.post("/api/auth/login", json={"password": "testpass"})
         assert login.headers.get("cache-control") == "no-store"
@@ -369,7 +380,8 @@ class TestRangeCache:
         pinned by an edge cache after a release."""
         from fastapi.testclient import TestClient
         from monad_monitor.api_server import create_app
-        app = create_app(password="testpass", jwt_secret="secret", prometheus_url="http://localhost:9090", validators_config=[])
+        app = create_app(password="testpass", jwt_secret="secret", prometheus_url="http://localhost:9090",
+            validators_config=[{"name": "TestVal", "host": "1.2.3.4", "network": "testnet"}])
         client = TestClient(app)
         r = client.get("/dashboard/")
         assert r.status_code == 200
@@ -426,3 +438,136 @@ class _FakeClientTwoSeries:
                 {"metric": {"service_version": "0.15.2"}, "values": fresh},
             ]},
         })
+
+
+VALIDATORS = [{"name": "TestVal", "host": "1.2.3.4", "network": "testnet"}]
+
+
+def _make_client(cookie_secure: str = "auto", validators_config=None):
+    from fastapi.testclient import TestClient
+    from monad_monitor.api_server import create_app
+    app = create_app(
+        password="testpass",
+        jwt_secret="secret",
+        prometheus_url="http://localhost:9090",
+        validators_config=VALIDATORS if validators_config is None else validators_config,
+        cookie_secure=cookie_secure,
+    )
+    return TestClient(app)
+
+
+class TestLoginHardening:
+    """Wrong passwords are budgeted; the correct one always gets in."""
+
+    def test_wrong_passwords_are_throttled(self):
+        client = _make_client()
+
+        for _ in range(LOGIN_FAILURE_LIMIT):
+            assert client.post("/api/auth/login", json={"password": "nope"}).status_code == 401
+
+        throttled = client.post("/api/auth/login", json={"password": "nope"})
+
+        assert throttled.status_code == 429
+        assert int(throttled.headers["Retry-After"]) > 0
+
+    def test_correct_password_still_works_when_budget_is_exhausted(self):
+        """An attacker filling the budget must not lock the operator out."""
+        client = _make_client()
+        for _ in range(LOGIN_FAILURE_LIMIT + 5):
+            client.post("/api/auth/login", json={"password": "nope"})
+
+        assert client.post("/api/auth/login", json={"password": "testpass"}).status_code == 200
+
+    def test_budget_is_scoped_to_the_app(self):
+        throttled = _make_client()
+        for _ in range(LOGIN_FAILURE_LIMIT + 1):
+            throttled.post("/api/auth/login", json={"password": "nope"})
+        assert throttled.post("/api/auth/login", json={"password": "nope"}).status_code == 429
+
+        fresh = _make_client()
+        assert fresh.post("/api/auth/login", json={"password": "nope"}).status_code == 401
+
+    def test_malformed_bodies_are_rejected(self):
+        client = _make_client()
+
+        assert client.post(
+            "/api/auth/login", content=b"{not json", headers={"Content-Type": "application/json"}
+        ).status_code == 400
+        assert client.post("/api/auth/login", json=["testpass"]).status_code == 400
+        assert client.post("/api/auth/login", json={"password": 1234}).status_code == 400
+        assert client.post("/api/auth/login", json={}).status_code == 400
+
+
+class TestValidatorAllowList:
+    """Only names from the config may be interpolated into PromQL."""
+
+    def _session_headers(self, client):
+        login = client.post("/api/auth/login", json={"password": "testpass"})
+        return {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    def test_configured_validator_is_accepted(self):
+        """An empty series is still a successful query (Prometheus may be down)."""
+        client = _make_client()
+
+        response = client.get(
+            "/api/chart/TestVal/block_height", headers=self._session_headers(client)
+        )
+
+        assert response.status_code == 200
+        assert response.json()["validator"] == "TestVal"
+
+    def test_unknown_validator_is_rejected(self):
+        client = _make_client()
+        headers = self._session_headers(client)
+        injection = 'x"} or vector(1) or vector(1){x="'
+
+        chart = client.get(f"/api/chart/{injection}/block_height", headers=headers)
+        metrics = client.get(f"/api/metrics/{injection}", headers=headers)
+
+        assert chart.status_code == 404
+        assert metrics.status_code == 404
+        assert "Unknown validator" in chart.json()["detail"]
+
+
+class TestSecurityHeaders:
+    """Defensive headers on every response."""
+
+    def test_headers_on_api_and_dashboard(self):
+        client = _make_client()
+
+        for path in ("/api/health", "/dashboard/"):
+            response = client.get(path)
+            assert response.headers["X-Content-Type-Options"] == "nosniff"
+            assert response.headers["X-Frame-Options"] == "DENY"
+            assert response.headers["Referrer-Policy"] == "no-referrer"
+            csp = response.headers["Content-Security-Policy"]
+            assert "frame-ancestors 'none'" in csp
+            assert "object-src 'none'" in csp
+            assert "https://cdn.jsdelivr.net" in csp
+
+
+class TestCookieSecure:
+    """DASHBOARD_COOKIE_SECURE: auto / always / never."""
+
+    def _set_cookie(self, client, **kwargs) -> str:
+        response = client.post("/api/auth/login", json={"password": "testpass"}, **kwargs)
+        assert response.status_code == 200
+        return response.headers["set-cookie"]
+
+    def test_auto_marks_secure_when_a_proxy_reports_https(self):
+        cookie = self._set_cookie(_make_client("auto"), headers={"X-Forwarded-Proto": "https"})
+        assert "secure" in cookie.lower()
+
+    def test_auto_keeps_plain_http_working(self):
+        assert "secure" not in self._set_cookie(_make_client("auto")).lower()
+
+    def test_always_forces_secure(self):
+        assert "secure" in self._set_cookie(_make_client("always")).lower()
+
+    def test_never_ignores_the_proxy_header(self):
+        cookie = self._set_cookie(_make_client("never"), headers={"X-Forwarded-Proto": "https"})
+        assert "secure" not in cookie.lower()
+
+    def test_unknown_mode_falls_back_to_auto(self):
+        cookie = self._set_cookie(_make_client("garbage"), headers={"X-Forwarded-Proto": "https"})
+        assert "secure" in cookie.lower()

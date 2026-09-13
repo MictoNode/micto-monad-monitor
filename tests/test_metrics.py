@@ -685,3 +685,79 @@ class TestActiveSetDisagreementLogging:
 
         assert result["is_active"] is False
         assert result["source"] == "gmonads_api"
+
+
+# TrieDB textfile-collector payload, shaped after scripts/triedb-collector.sh
+# (one # HELP/# TYPE pair per metric, drive="triedb" on the capacity family).
+TRIEDB_METRICS = """# HELP monad_triedb_capacity_bytes Total capacity of TrieDB storage
+# TYPE monad_triedb_capacity_bytes gauge
+monad_triedb_capacity_bytes{drive="triedb"} 3.814697265625e+12
+# HELP monad_triedb_used_bytes Used capacity of TrieDB storage
+# TYPE monad_triedb_used_bytes gauge
+monad_triedb_used_bytes{drive="triedb"} 3.0441e+12
+# HELP monad_triedb_avail_bytes Available capacity of TrieDB storage
+# TYPE monad_triedb_avail_bytes gauge
+monad_triedb_avail_bytes{drive="triedb"} 7.7059e+11
+# TYPE monad_triedb_used_percent gauge
+monad_triedb_used_percent{drive="triedb"} 79.8
+# TYPE monad_triedb_fast_chunks gauge
+monad_triedb_fast_chunks 8
+# TYPE monad_triedb_fast_capacity_bytes gauge
+monad_triedb_fast_capacity_bytes 8589934592
+# TYPE monad_triedb_fast_used_bytes gauge
+monad_triedb_fast_used_bytes 6442450944
+# TYPE monad_triedb_slow_chunks gauge
+monad_triedb_slow_chunks 3
+# TYPE monad_triedb_slow_capacity_bytes gauge
+monad_triedb_slow_capacity_bytes 805306368
+# TYPE monad_triedb_slow_used_bytes gauge
+monad_triedb_slow_used_bytes 690000000
+# TYPE monad_triedb_free_chunks gauge
+monad_triedb_free_chunks 14207
+# TYPE monad_triedb_history_count gauge
+monad_triedb_history_count 3
+# TYPE monad_triedb_history_max gauge
+monad_triedb_history_max 100
+"""
+
+
+class TestTriedbMetrics:
+    """TrieDB metrics come from the validator-side textfile collector."""
+
+    def _parse(self, raw: str = TRIEDB_METRICS):
+        scraper = MetricsScraper(metrics_url="", rpc_url="")
+        return scraper._parse_triedb_metrics(raw)
+
+    def test_parses_capacity_family(self):
+        result = self._parse()
+
+        assert result["capacity_bytes"] == 3.814697265625e12
+        assert result["used_bytes"] == 3.0441e12
+        assert result["avail_bytes"] == 7.7059e11
+        assert result["used_percent"] == 79.8
+
+    def test_parses_chunk_tiers_and_history(self):
+        result = self._parse()
+
+        assert result["fast_chunks"] == 8
+        assert result["fast_used_bytes"] == 6442450944.0
+        assert result["slow_chunks"] == 3
+        assert result["slow_used_bytes"] == 690000000.0
+        assert result["free_chunks"] == 14207
+        assert result["history_count"] == 3
+        assert result["history_max"] == 100
+
+    def test_plain_integer_values_parse(self):
+        """The collector prints chunk bytes as plain integers, not exponents."""
+        result = self._parse('monad_triedb_used_bytes{drive="triedb"} 3044100000000\n')
+
+        assert result["used_bytes"] == 3044100000000.0
+
+    def test_empty_payload_yields_no_metrics(self):
+        assert self._parse("") == {}
+
+    def test_line_without_the_drive_label_is_not_used_for_capacity(self):
+        """Capacity must come from the labelled series only."""
+        result = self._parse("monad_triedb_used_bytes 123\n")
+
+        assert "used_bytes" not in result

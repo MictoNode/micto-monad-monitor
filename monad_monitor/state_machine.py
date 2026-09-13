@@ -151,33 +151,6 @@ class ValidatorStateMachine:
         else:  # INACTIVE
             return "recovery"
 
-    def should_alert_on(self, alert_type: str) -> bool:
-        """
-        Determine if an alert should be sent for the given alert type.
-
-        Args:
-            alert_type: Type of alert (e.g., "local_timeout", "node_down")
-
-        Returns:
-            True if alert should be sent, False to suppress
-        """
-        # Always alert on critical infrastructure issues
-        if alert_type in self.ALWAYS_ALERT_TYPES:
-            return True
-
-        # For ACTIVE-only alerts, only alert if validator is ACTIVE
-        if alert_type in self.ACTIVE_ONLY_ALERT_TYPES:
-            return self.current_state == ValidatorState.ACTIVE
-
-        # Default: alert based on threshold
-        threshold = self.get_alert_threshold()
-        if threshold == "minimal":
-            return False  # Suppress most alerts for new validators
-        elif threshold == "recovery":
-            return False  # Suppress most alerts for inactive validators
-        else:
-            return True  # Full alerts for active validators
-
     def get_transition_history(self) -> List[StateTransition]:
         """Get list of all state transitions"""
         return list(self._transition_history)

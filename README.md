@@ -16,7 +16,7 @@
 - **Metrics Dashboard** - 26 Prometheus charts across 6 sections at `http://your-server:8383`
 - **Monitor Dashboard** - Real-time validator status at `http://your-server:8282`
 - **Time range selector** - 1m, 5m, 30m, 1h, 24h, 1w, 1mo per chart section
-- **Multi-source validation** - Huginn + gmonads API cross-validation
+- **Multi-source validation** - Huginn status with gmonads as the deciding source when the two disagree
 - **Active set tracking** - Know when your validator enters/leaves active set
 - **Pushover emergency alerts** - Bypass Do Not Disturb mode
 - **Discord webhook support** - Community alerts
@@ -266,6 +266,7 @@ nano .env
 | `SLACK_WEBHOOK_URL` | No | Slack incoming webhook URL |
 | `DASHBOARD_PASSWORD` | No | Metrics dashboard password (empty = disabled) |
 | `DASHBOARD_JWT_SECRET` | No | JWT secret for metrics dashboard (`openssl rand -hex 32`) |
+| `DASHBOARD_COOKIE_SECURE` | No | Session cookie hardening: `auto` (default) marks it Secure over HTTPS, `always` / `never` force the flag |
 | `TZ` | No | Timezone (default: UTC). Alert clock times follow it; the UTC equivalent is shown alongside whenever the two differ |
 | `HEALTH_PORT` | No | Overrides `health_server.port` (default 8181) |
 | `DASHBOARD_PORT` | No | Overrides `dashboard_server.port` (default 8282) |
@@ -409,6 +410,7 @@ Each validator card displays:
            proxy_set_header Host $host;
            proxy_set_header X-Real-IP $remote_addr;
            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header X-Forwarded-Proto $scheme;
        }
 
        listen 80;
@@ -440,6 +442,8 @@ Production-grade metrics dashboard with Prometheus time-series charts at `http:/
    ```env
    DASHBOARD_PASSWORD=your_secure_password
    DASHBOARD_JWT_SECRET=<generate with: openssl rand -hex 32>
+   # Optional: force the Secure cookie flag if your proxy does not forward the scheme
+   # DASHBOARD_COOKIE_SECURE=always
    ```
 
 2. Restart services:
@@ -508,6 +512,7 @@ After login, the dashboard shows **9 stat boxes** and **26 time-series charts** 
            proxy_set_header Host $host;
            proxy_set_header X-Real-IP $remote_addr;
            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header X-Forwarded-Proto $scheme;
        }
 
        listen 80;
@@ -544,7 +549,7 @@ Leave `DASHBOARD_PASSWORD` and `DASHBOARD_JWT_SECRET` empty (or remove them) to 
 │  │   ├── Monitor Dashboard :8282                │
 │  │   └── Metrics Dashboard :8383 (FastAPI)      │
 │  │                                               │
-│  └── Prometheus Container :9090 (30d retention) │
+│  └── Prometheus Container :9090 (30d/5GB)       │
 │                                                  │
 │  Nginx (optional)                               │
 │  ├── monad-monitor.domain.com → :8282           │
@@ -599,7 +604,7 @@ docker compose logs | grep -E "8282|8383"
 docker compose ps
 
 # Metrics dashboard not working? Check env vars:
-docker compose exec monitor env | grep DASHBOARD
+docker compose exec monad-validator-monitor env | grep DASHBOARD
 ```
 
 ### Too many alerts
@@ -722,6 +727,10 @@ through a reverse proxy in a typical deployment).
 | `GET /api/overview` | Latest values for every configured validator (dashboard stat boxes) |
 | `GET /api/metrics/{name}` | Raw metric values for a validator |
 | `GET /api/chart/{name}/{key}?range=1h` | Time-series chart data (ranges: 1m, 5m, 30m, 1h, 24h, 1w, 1mo) |
+
+> `{name}` must match a validator in your config: the value is interpolated into a PromQL label selector, so any other name is rejected with 404 instead of being queried.
+
+**Prometheus retention:** the bundled instance keeps 30 days **or** 5 GB, whichever limit is hit first (`docker-compose.yaml`). On a busy deployment the size cap can cut the window short — scale `--storage.tsdb.retention.size` to the `prometheus-data` volume if you rely on the 1w/1mo ranges.
 
 ---
 

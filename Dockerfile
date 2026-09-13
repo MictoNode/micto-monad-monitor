@@ -1,4 +1,8 @@
-FROM python:3.11-slim
+# Pinned to the bookworm variant: the floating python:3.11-slim tag can silently
+# move to a newer Debian release (trixie), changing libc/apt behaviour. The
+# Python patch version still floats on purpose so security updates arrive
+# without a release here.
+FROM python:3.11-slim-bookworm
 
 # tzdata: Debian slim has no IANA timezone database; without it glibc cannot
 # resolve the container TZ env (e.g. Europe/Istanbul) and silently falls back

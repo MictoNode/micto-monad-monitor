@@ -117,7 +117,6 @@ def sample_config() -> Dict[str, Any]:
         "monitoring": {
             "check_interval": 60,
             "alert_threshold": 3,
-            "health_report_interval": 3600,
             "timeout": 10,
         },
         "thresholds": {
