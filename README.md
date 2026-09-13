@@ -13,7 +13,7 @@
 
 ## What's New
 
-- **Metrics Dashboard** - 27 Prometheus charts across 7 sections at `http://your-server:8383`
+- **Metrics Dashboard** - 26 Prometheus charts across 6 sections at `http://your-server:8383`
 - **Monitor Dashboard** - Real-time validator status at `http://your-server:8282`
 - **Time range selector** - 1m, 5m, 30m, 1h, 24h, 1w, 1mo per chart section
 - **Multi-source validation** - Huginn + gmonads API cross-validation
@@ -22,6 +22,7 @@
 - **Discord webhook support** - Community alerts
 - **Slack webhook support** - Team alerts
 - **All alert channels optional** - Use any combination of Telegram, Pushover, Discord, Slack
+- **Monitor health visibility** - `/health` reports whether the monitor itself is alive, plus per-channel alert delivery counters
 - **New version notifications** - Monitor checks GHCR weekly and alerts you (Telegram + Discord + Slack, no Pushover) when a new release is available
 
 ---
@@ -92,9 +93,11 @@ You should get a **"Monad Monitor Started"** message on your configured alert ch
 | **Node Down** | Can't reach metrics or blocks stopped | Telegram + Pushover + Discord + Slack |
 | **Network Timeout** | Missed rounds seen by network (Huginn), increase ≥ `huginn_timeout_alert_threshold` | Telegram + Pushover + Discord + Slack |
 | **High Resources (Critical)** | CPU/RAM/Disk ≥ 95% | Telegram + Pushover + Discord + Slack |
-| **High Resources (Warning)** | CPU/RAM/Disk ≥ 90% | Telegram + Discord + Slack |
-| **Active Set Changes** | Enters or leaves active set; the LEFT alert notes when the validator is already in the staking entering list for the next epoch (queued to return at the next epoch boundary) | Telegram + Discord + Slack |
-| **Active Set Exit Warning** | Huginn staking data lists your validator as leaving the active set next epoch (`monitoring.validator_set_warning`, on by default). On testnet the message notes that active-set membership is rotated in batches by an automated rotation script and a leaving entry is often routine; on mainnet the raw exit warning is sent unchanged | Telegram + Discord + Slack |
+| **High Resources (Warning)** | CPU/RAM ≥ 90%, disk ≥ 85% | Telegram + Discord + Slack |
+| **NVMe Wear** | Wear ≥ 70% (warning) or ≥ 95% (critical), from node_exporter SMART metrics | Warning → Telegram + Discord + Slack; Critical → Telegram + Pushover + Discord + Slack |
+| **Active Set Changes** | Enters or leaves the active set; the LEFT message notes when the validator is already queued to return at the next epoch | Telegram + Discord + Slack |
+| **Active Set Exit Warning** | Your validator is listed to leave the active set at the next epoch (`monitoring.validator_set_warning`, on by default). On testnet the message notes that rotation is routine and often reverses | Telegram + Discord + Slack |
+| **Channel Degraded** | An alert channel keeps failing; you are warned through the channels that still work | Telegram + Discord + Slack |
 | **Recovery** | Validator back online | Telegram + Discord + Slack |
 | **Extended Report** | 6-hour detailed report with 24h, 30d and all-time uptime | Telegram + Discord + Slack |
 
@@ -107,14 +110,11 @@ You should get a **"Monad Monitor Started"** message on your configured alert ch
 > - All channels are optional — configure any combination
 > - Pushover: Only CRITICAL alerts (emergency channel), 30-minute cooldown per validator
 > - Discord/Slack: Optional, receives ALL alerts if configured
-> - **Active set changes require a verified verdict.** When no source can say
->   whether the validator is in the active set (Huginn and gmonads both
->   unreachable, no local evidence), the monitor holds the last known state
->   instead of guessing "inactive" — that guess used to send a misleading
->   `LEFT ACTIVE SET` and mute the active-only alerts until the sources
->   recovered. Health, resource and network-timeout alerts keep working
->   regardless. A deployment that disables both Huginn and gmonads therefore
->   does not get active-set transitions at all; everything else is unaffected.
+> - **Active-set changes need a verified verdict.** If neither Huginn nor
+>   gmonads can tell whether the validator is in the active set, the monitor
+>   keeps the last known state rather than guessing; health, resource and
+>   network-timeout alerts keep working. A setup that disables both sources
+>   gets no active-set transitions at all.
 
 ---
 
@@ -266,9 +266,13 @@ nano .env
 | `DASHBOARD_PASSWORD` | No | Metrics dashboard password (empty = disabled) |
 | `DASHBOARD_JWT_SECRET` | No | JWT secret for metrics dashboard (`openssl rand -hex 32`) |
 | `TZ` | No | Timezone (default: UTC) |
+| `HEALTH_PORT` | No | Overrides `health_server.port` (default 8181) |
+| `DASHBOARD_PORT` | No | Overrides `dashboard_server.port` (default 8282) |
+| `API_PORT` | No | Metrics dashboard port (default 8383) |
 
 > At least one alert channel must be configured.
 > Metrics Dashboard requires both `DASHBOARD_PASSWORD` and `DASHBOARD_JWT_SECRET` to be set.
+> The three port variables are always passed by `docker-compose.yaml`, so they win over the ports in `config.yaml` — change them here, not there. If you change `HEALTH_PORT`, update the compose healthcheck too.
 
 Save: `Ctrl+O`, Exit: `Ctrl+X`
 
@@ -295,7 +299,7 @@ validators:
 | `name` | **Yes** | Display name |
 | `host` | **Yes** | Validator IP |
 | `network` | **Yes** | `testnet` or `mainnet` |
-| `metrics_port` | **Yes** | Default: 8889 |
+| `metrics_port` | **Yes** | 8889; use 9143 on Monad ≥ v0.16.2 (see the metrics-port migration note) |
 | `rpc_port` | **Yes** | Default: 8080 |
 | `node_exporter_port` | No | Delete if not using system metrics |
 | `validator_secp` | **Yes** | 66 chars, starts with 02/03 |
@@ -377,7 +381,7 @@ Each validator card displays:
 | **Status** | ACTIVE / WARNING / INACTIVE / CRITICAL |
 | **Height** | Current block height |
 | **Peers** | Connected peer count |
-| **Uptime (24h)** | Huginn participation for the rolling 24h window; the card also shows the 30d and all-time percentages, plus cumulative finalized/timeout counts and Huginn liveness |
+| **Uptime (24h)** | Huginn participation for the rolling 24h window; the card also shows the 30d and all-time percentages, cumulative finalized/timeout counts, and Huginn/gmonads liveness in the footer |
 | **Fails** | Consecutive check failures |
 
 - **5-second auto-refresh** - Real-time updates
@@ -443,7 +447,7 @@ Production-grade metrics dashboard with Prometheus time-series charts at `http:/
 
 3. Open `http://your-server:8383` and enter your password.
 
-> Prometheus starts automatically with `docker compose up` and scrapes validator metrics from `:8889` and `:9100`.
+> Prometheus starts automatically with `docker compose up` and scrapes each validator on the `metrics_port` and (if set) `node_exporter_port` from `validators.yaml`.
 
 ### Overview
 
@@ -534,7 +538,7 @@ Leave `DASHBOARD_PASSWORD` and `DASHBOARD_JWT_SECRET` empty (or remove them) to 
 │  Docker Compose                                 │
 │  ├── Monitor Container                          │
 │  │   ├── Monitor (checks validators)            │
-│  │   ├── Health Server :8181 (internal)         │
+│  │   ├── Health Server :8181                    │
 │  │   ├── Monitor Dashboard :8282                │
 │  │   └── Metrics Dashboard :8383 (FastAPI)      │
 │  │                                               │
@@ -554,6 +558,10 @@ Leave `DASHBOARD_PASSWORD` and `DASHBOARD_JWT_SECRET` empty (or remove them) to 
 │ :9100    │  │ :9100    │  │ :9100    │
 └──────────┘  └──────────┘  └──────────┘
 ```
+
+> All four ports (8181, 8282, 8383, 9090) are published on the monitor host. Only
+> the dashboards need to be reachable from outside (through your reverse proxy);
+> restrict 8181 and 9090 to your own network.
 
 ---
 
@@ -601,6 +609,17 @@ monitoring:
   huginn_timeout_alert_threshold: 3  # Only alert when 3+ missed rounds accumulate per check window (network timeouts)
 ```
 
+### Container shows unhealthy / healthcheck failing
+
+```bash
+# /health returns 503 when the monitor has not finished a check for a while
+curl -s localhost:8181/health | jq '{freshness, check_age_seconds, status}'
+```
+
+`freshness: "stale"` means the monitor loop stopped making progress (a hung
+check, or a host-level problem) - look at `docker compose logs` next. A validator
+being down does **not** make the container unhealthy; that shows in `status`.
+
 ### State not persisting (false alerts on restart)
 
 ```bash
@@ -623,7 +642,9 @@ micto-monad-monitor/
 │   ├── config.yaml            # Settings (thresholds, intervals)
 │   └── validators.yaml        # Your validators
 ├── scripts/
-│   └── triedb-collector.sh    # TrieDB + NVMe metrics (run on validator)
+│   ├── triedb-collector.sh    # TrieDB + NVMe metrics (run on validator)
+│   ├── generate_targets.py    # Writes the Prometheus target file
+│   └── entrypoint.sh          # Container startup
 └── monad_monitor/
     ├── main.py                # Entry point
     ├── alerts.py              # Telegram, Pushover, Discord, Slack
@@ -647,27 +668,22 @@ micto-monad-monitor/
 | `GET /live` | Liveness probe |
 | `GET /metrics` | Prometheus metrics |
 
-`/health` answers **"is the monitor loop still ticking?"**: it returns `200` while
-the monitor keeps checking, and `503` once the last tick is older than
-`health_server.staleness_threshold` (default `300` seconds). The heartbeat
-advances every second while the loop runs (and per validator during a check), so
-this is a **stall detector, not a cycle timer**: a slow cycle — any
-`check_interval`, any number of validators — never trips it, while a wedged loop
-is caught within the threshold. Validator health is reported in the body, never
-in the status code — a validator having a bad minute must not mark the monitoring
-container itself as down, and any external watchdog (healthchecks.io,
-UptimeRobot, an orchestrator…) can be pointed at `/health` and read exactly what
-it says:
+`/health` reports the **monitor's own health**: `200` while it is checking your
+validators, `503` if it has stopped checking (no tick within
+`health_server.staleness_threshold`, default 300 seconds). Validator state is in
+the body rather than the status code, so a validator problem never marks the
+monitoring container unhealthy — point any watchdog (healthchecks.io,
+UptimeRobot, an orchestrator) at `/health` and it means what it says:
 
 ```json
 {
   "status": "healthy",              // validator aggregate: healthy | unhealthy | unknown
   "freshness": "ok",                // ok | stale | unknown
-  "check_age_seconds": 1.4,         // seconds since the monitor loop last ticked
+  "check_age_seconds": 0.8,         // seconds since the last check
   "uptime_seconds": 3600.5,
-  "version": "v1.7.8",
+  "version": "v1.7.9",
   "validators": { "...": {} },
-  "alerts": {                       // per-channel delivery counters, visibility only
+  "alerts": {                       // per-channel delivery counters
     "telegram": {"sent": 12, "failed": 0, "consecutive_failures": 0},
     "pushover": {"sent": 1, "failed": 0, "consecutive_failures": 0},
     "discord": {"sent": 12, "failed": 0, "consecutive_failures": 0},
@@ -676,30 +692,10 @@ it says:
 }
 ```
 
-The `alerts` block is how a silently dead channel becomes visible: only channels
-that are configured and actually attempted are counted, so a non-zero
-`failed` (or a growing `consecutive_failures`) on a channel that should be
-delivering alerts is the signal that the channel itself is broken. When a
-channel crosses three consecutive **outage-class** failures (connection error,
-401/403/404/429 or 5xx), the monitor sends one WARNING through the channels that
-still work — once per episode, re-armed after the channel delivers again. A 400
-or 413 is treated as our own payload problem rather than a channel outage, so a
-formatting/length bug can never masquerade as a dead channel.
-
-Telegram's legacy Markdown is also respected: characters that would break the
-parse (`_ * \` [`) are escaped inside dynamic values (validator names, hosts)
-before they are interpolated, so a validator whose name contains one of them no
-longer makes Telegram reject the message with 400 — the failure mode that used
-to silence the channel entirely for that validator. Discord and Slack receive the
-un-escaped text. Telegram's 4096-character message limit is out of scope (the
-monitor's own messages are structurally bounded).
-
-Alerts that no channel accepted are queued for retry **on the state volume**
-(`/app/state/failed_alerts.json`), so a restart, a crash or a long outage cannot
-lose a CRITICAL; retries are bounded to three per monitoring cycle so draining
-the queue cannot stall the loop, and entries older than an hour are dropped. If
-the state directory is not writable the queue degrades to memory-only with an
-error log — alerting itself never depends on disk.
+The `alerts` counters show whether each channel is really delivering: if one
+keeps failing, the monitor warns you once through the channels that still work.
+A CRITICAL that no channel accepted is retried automatically, and the queue
+survives restarts (kept in `/app/state`).
 
 ### Monitor Dashboard (:8282)
 
@@ -721,7 +717,7 @@ through a reverse proxy in a typical deployment).
 | `POST /api/auth/logout` | Clear JWT cookie |
 | `GET /api/health` | Prometheus connectivity check |
 | `GET /api/validators` | List configured validators |
-| `GET /api/overview/{name}` | Stat box data for a validator |
+| `GET /api/overview` | Latest values for every configured validator (dashboard stat boxes) |
 | `GET /api/metrics/{name}` | Raw metric values for a validator |
 | `GET /api/chart/{name}/{key}?range=1h` | Time-series chart data (ranges: 1m, 5m, 30m, 1h, 24h, 1w, 1mo) |
 
@@ -731,7 +727,7 @@ through a reverse proxy in a typical deployment).
 
 | API | Purpose | Rate Limit |
 |-----|---------|------------|
-| [Huginn Tech](https://huginn.tech) | Validator uptime (rolling 24h, 30d and cumulative epoch snapshots), active set and next-epoch exit warnings | API v2: uptime/validator endpoints have no documented per-validator limit; client requests `period=all` + `period=30d` and merges `/health` for the 24h figure; caches 10 min. Staking endpoints (`/staking/validator-set`, `/validators`) are limited to **60 req/min/IP shared**: the validator-set (forward-looking enter/leave lists) is refreshed every 2 minutes — independent of the per-validator uptime cache so exit warnings stay fresh — and the secp→id map once per cache interval |
+| [Huginn Tech](https://huginn.tech) | Validator uptime (24h, 30d, all-time), active-set status, next-epoch exit warnings | No documented per-validator limit; the staking endpoints (`/staking/validator-set`, `/validators`) share **60 req/min/IP** and the monitor caches to stay well inside it |
 | [gmonads.com](https://gmonads.com) | Network TPS, block fullness, fallback | 30 req/min |
 
 ---
@@ -786,7 +782,7 @@ Monad is moving validator metrics from **push** (an OTEL collector re-exposing e
 - Monad Foundation will scrape your endpoint directly once the migration completes; `:8889` (OTEL collector) will be retired.
 - **You do not have to change anything yet.** Keep pushing metrics to MF as you do today, and keep `metrics_port: 8889` until MF announces the cut-over.
 
-**When you switch**, point the validator's `metrics_port` at `9143` in `validators.yaml` and let the monitor pick it up (Prometheus targets are regenerated on the next check cycle):
+**When you switch**, point the validator's `metrics_port` at `9143` in `validators.yaml` and restart the monitor container (Prometheus targets are rewritten at container start):
 
 ```yaml
 validators:
@@ -794,11 +790,11 @@ validators:
     metrics_port: 9143      # node-published metrics (Monad >= 0.16.2)
 ```
 
-**Coverage (verified against a live v0.16.2 testnet node):** `:9143` serves **every metric family the monitor charts**. The one exception used to be the RPC metrics section — those came from the separate `monad-rpc` service, which the OTEL collector aggregated — and that section has been **removed** (see v1.7.2 below), so the switch costs no chart. The 8889-only leftovers (`monad_rpc_request_duration_seconds_*`, two `monad_bft_raptorcast_secondary_publisher_*` families) were never queried by the monitor.
+**Coverage:** `:9143` serves every metric family the monitor charts, so the switch costs no chart (the RPC charts that needed `:8889` were removed in v1.7.2).
 
 **Firewall:** keep `:8889` and `:9143` reachable **only from your monitor server** — metrics have no reason to be public. When MF switches to pull, add MF's scraper IPs as well.
 
-**What does *not* change:** the TrieDB + NVMe SMART collector script (`scripts/triedb-collector.sh` → node_exporter text-file metrics on `:9100`) stays in use. The native `monad_triedb_*` metrics do **not** replace the fast/slow/free tier breakdown, the history retention figures, or NVMe wear level / temperature.
+**What does *not* change:** the TrieDB + NVMe SMART collector script (`scripts/triedb-collector.sh` → node_exporter text-file metrics on `:9100`) stays in use — it carries the fast/slow/free tier breakdown and NVMe wear/temperature.
 
 ### Version-Specific Steps
 
@@ -807,7 +803,7 @@ validators:
 This update adds the **Metrics Dashboard** (:8383) with Prometheus charts. It's optional — your existing setup continues to work without any config changes.
 
 **New features:**
-- Metrics Dashboard with 27 Prometheus charts
+- Metrics Dashboard with Prometheus charts (27 at the time - the RPC section was removed in v1.7.2, leaving the 26 charted today)
 - Prometheus container (auto-starts with `docker compose up`)
 - Time range selector per chart section (1m, 5m, 30m, 1h, 24h, 1w, 1mo)
 - Per-method RPC latency charts
@@ -877,8 +873,6 @@ docker compose ps
 #### v1.7.2 — RPC metrics section removed
 
 The metrics dashboard no longer carries an **RPC** section (the 5 charts: active requests, execution duration, call rate per method, wait time, per-method latency).
-
-**Why:** those charts were the only thing the monitor still read from `monad-rpc` through the OTEL collector on `:8889`, and Monad Foundation is retiring that collector. Everything else the dashboard charts already comes from the node itself on `:9143`, so dropping the section makes the metrics-port switch lossless.
 
 **Unchanged:**
 - The RPC **health check** (`rpc_port: 8080` → `RPC: Healthy / Down` in the card details)
