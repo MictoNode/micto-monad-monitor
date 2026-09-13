@@ -51,6 +51,12 @@ STATUS_PATH = "/status"
 VALIDATORS_PAGE_LIMIT = 500
 MAX_VALIDATOR_PAGES = 10
 
+# Forward-looking validator-set data must be sampled densely: the next-epoch
+# snapshot can appear shortly before the epoch boundary, and a stale cache
+# turns the next-epoch exit warning into a lottery. 120s stays far inside the
+# staking rate budget (60 req/min/IP shared across all staking calls).
+VALIDATOR_SET_CACHE_TTL = 120
+
 # Validator API "status" field values (v2)
 STATUS_ACTIVE = "active"
 STATUS_INACTIVE = "inactive"
@@ -293,6 +299,7 @@ class HuginnClient:
         # get_validator_id). Kept apart from the per-validator uptime cache.
         self._validator_set_cache: Dict[str, ValidatorSetState] = {}
         self._validator_set_times: Dict[str, float] = {}
+        self._validator_set_failure_logged: Dict[str, bool] = {}
         self._secp_id_cache: Dict[str, Dict[str, int]] = {}
         self._secp_id_times: Dict[str, float] = {}
         # Circuit breaker for each network
@@ -711,7 +718,8 @@ class HuginnClient:
         Fetched with the auxiliary single-shot path (no circuit-breaker
         involvement) because this is enrichment, not the canonical verdict: a
         staking outage must not block uptime checks. Cached per network for
-        check_interval; on failure the previous cached state is returned.
+        VALIDATOR_SET_CACHE_TTL (short - forward-looking data is only useful
+        if it is fresh); on failure the previous cached state is returned.
 
         Args:
             network: Network name ('testnet' or 'mainnet'). Defaults to 'testnet'.
@@ -723,7 +731,7 @@ class HuginnClient:
         now = time.time()
         cached_time = self._validator_set_times.get(cache_key, 0)
         if cache_key in self._validator_set_cache and \
-                now - cached_time < self.config.check_interval:
+                now - cached_time < VALIDATOR_SET_CACHE_TTL:
             return self._validator_set_cache[cache_key]
 
         base_url = self.config.get_endpoint(network)
@@ -731,8 +739,17 @@ class HuginnClient:
         state = self._parse_validator_set(data, network) if isinstance(data, dict) else None
 
         if state is None:
+            if not self._validator_set_failure_logged.get(cache_key, False):
+                self._logger.warning(
+                    f"Validator set fetch failed for {network} - "
+                    f"next-epoch exit warning runs on cached data"
+                )
+                self._validator_set_failure_logged[cache_key] = True
+            else:
+                self._logger.debug(f"Validator set fetch failed for {network} (repeat)")
             return self._validator_set_cache.get(cache_key)
 
+        self._validator_set_failure_logged[cache_key] = False
         self._validator_set_cache[cache_key] = state
         self._validator_set_times[cache_key] = now
         return state
@@ -895,6 +912,7 @@ class HuginnClient:
         self._status_cache.clear()
         self._validator_set_cache.clear()
         self._validator_set_times.clear()
+        self._validator_set_failure_logged.clear()
         self._secp_id_cache.clear()
         self._secp_id_times.clear()
 

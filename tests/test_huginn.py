@@ -1,6 +1,8 @@
 """Tests for Huginn API client with multi-network support"""
 
+import logging
 import time
+
 import pytest
 import responses
 
@@ -1158,7 +1160,7 @@ class TestValidatorSet:
             )
             client.get_validator_set("testnet")
 
-        client.config.check_interval = 0  # force a refresh attempt
+        client._validator_set_times["testnet"] -= 999  # backdate past the TTL to force a refresh attempt
         with responses.RequestsMock():
             # /staking/validator-set intentionally NOT mocked -> request error
             state = client.get_validator_set("testnet")
@@ -1169,6 +1171,73 @@ class TestValidatorSet:
     def test_validator_set_failure_without_cache_is_none(self, client):
         with responses.RequestsMock():
             assert client.get_validator_set("testnet") is None
+
+    def test_validator_set_cache_ttl_is_short(self, client, validator_set_url):
+        """Forward-looking data must be sampled densely, not per check_interval."""
+        from monad_monitor import huginn as huginn_module
+
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.GET,
+                validator_set_url,
+                json=SAMPLE_VALIDATOR_SET_RESPONSE,
+                status=200,
+            )
+            client.get_validator_set("testnet")
+            client.get_validator_set("testnet")  # inside the TTL -> cached
+
+            assert len(rsps.calls) == 1
+
+        # Force expiry by backdating past the dedicated validator-set TTL.
+        client._validator_set_times["testnet"] -= huginn_module.VALIDATOR_SET_CACHE_TTL + 1
+
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.GET,
+                validator_set_url,
+                json=SAMPLE_VALIDATOR_SET_RESPONSE,
+                status=200,
+            )
+            client.get_validator_set("testnet")
+
+            assert len(rsps.calls) == 1
+
+    def test_validator_set_failure_logs_warning_once(self, client, validator_set_url, caplog):
+        with caplog.at_level(logging.DEBUG, logger="monad_monitor.huginn"):
+            with responses.RequestsMock():
+                # /staking/validator-set intentionally NOT mocked -> request error
+                first = client.get_validator_set("testnet")
+                second = client.get_validator_set("testnet")
+
+        assert first is None
+        assert second is None
+        warnings = [
+            r for r in caplog.records
+            if r.levelno == logging.WARNING and "Validator set fetch failed" in r.getMessage()
+        ]
+        assert len(warnings) == 1
+
+    def test_validator_set_recovery_rearms_the_warning(self, client, validator_set_url, caplog):
+        with caplog.at_level(logging.DEBUG, logger="monad_monitor.huginn"):
+            with responses.RequestsMock():
+                client.get_validator_set("testnet")  # fail
+            with responses.RequestsMock() as rsps:
+                rsps.add(
+                    responses.GET,
+                    validator_set_url,
+                    json=SAMPLE_VALIDATOR_SET_RESPONSE,
+                    status=200,
+                )
+                client.get_validator_set("testnet")  # recover
+            with responses.RequestsMock():
+                client._validator_set_times["testnet"] -= 999  # force a refresh attempt
+                client.get_validator_set("testnet")  # fail again, new episode
+
+        warnings = [
+            r for r in caplog.records
+            if r.levelno == logging.WARNING and "Validator set fetch failed" in r.getMessage()
+        ]
+        assert len(warnings) == 2
 
     def test_secp_to_id_map_paginates_and_caches(self, client):
         secp_a = "0xaaa"
