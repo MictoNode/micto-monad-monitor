@@ -181,6 +181,33 @@ class TestValidatorSetWarning:
         assert "delay period" in message
         assert "one further epoch" in message
 
+    def test_testnet_message_notes_batch_rotation(self):
+        result = self._warn()
+
+        assert result is True
+        message = self.alerts.alert_warning.call_args[0][0]
+        assert "rotation script" in message
+        assert "routine" in message
+        assert "reverses in a later epoch" in message
+
+    def test_mainnet_message_has_no_rotation_note(self):
+        self.validator = ValidatorConfig(
+            name="validator-main",
+            host="192.168.1.100",
+            metrics_port=8889,
+            rpc_port=8080,
+            node_exporter_port=None,
+            validator_secp="0x1234",
+            enabled=True,
+            network="mainnet",
+        )
+
+        result = self._warn()
+
+        assert result is True
+        message = self.alerts.alert_warning.call_args[0][0]
+        assert "rotation script" not in message
+
     def test_warning_uses_non_pushover_channels(self):
         """End-to-end through AlertHandler: Telegram only, never Pushover"""
         alerts = AlertHandler(

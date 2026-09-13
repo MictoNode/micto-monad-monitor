@@ -137,6 +137,12 @@ def warn_if_leaving_next_epoch(
         f"Huginn staking data: validator id {validator_id} is in the "
         f"leaving list for epoch {epoch} (stake {stake})."
     )
+    if (validator.network or "testnet").lower() == "testnet":
+        message += (
+            "\n\nNote: on testnet, active-set membership is rotated in batches by"
+            " an automated rotation script; a leaving entry is often routine and"
+            " typically reverses in a later epoch."
+        )
     if validator_set.in_delay_period:
         message += (
             "\n\nThe network is in a delay period; the transition may slip"
