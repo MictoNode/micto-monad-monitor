@@ -1,6 +1,7 @@
 """Configuration loader with environment variable support and validation"""
 
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional
@@ -13,10 +14,54 @@ from monad_monitor.gmonads import GmonadsConfig
 DEFAULT_UPDATE_IMAGE = "ghcr.io/mictonode/micto-monad-monitor"
 DEFAULT_UPDATE_CHECK_INTERVAL = 7 * 24 * 3600  # Weekly
 
+# config.example.yaml ships credentials as "${VARIABLE}" templates that the env
+# override in load_config() replaces only when the variable actually exists.
+# Any surviving "${...}" literal is a template - no real token looks like one -
+# so the conservative match is intentional.
+_PLACEHOLDER_RE = re.compile(r"^\$\{[^}]*\}$")
+
+# (section, key) pairs holding credentials seeded from the templates above
+_CREDENTIAL_FIELDS = (
+    ("telegram", "token"),
+    ("telegram", "chat_id"),
+    ("pushover", "user_key"),
+    ("pushover", "app_token"),
+    ("discord", "webhook_url"),
+    ("slack", "webhook_url"),
+)
+
 
 class ConfigValidationError(Exception):
     """Raised when configuration validation fails"""
     pass
+
+
+def _is_unresolved_placeholder(value: Any) -> bool:
+    """Whether a credential is still the literal "${VARIABLE}" template"""
+    return isinstance(value, str) and bool(_PLACEHOLDER_RE.match(value.strip()))
+
+
+def drop_unresolved_placeholders(config: Dict[str, Any]) -> List[str]:
+    """Blank credentials left as "${VARIABLE}" templates; name their channels.
+
+    The leftovers are what a commented-out line in .env produces: the variable
+    does not exist, so the env override keeps the config.yaml literal. Every
+    "is this channel configured?" check then reads `${PUSHOVER_APP_TOKEN}` as a
+    real credential and the monitor POSTs it to the API, which rejects the
+    request with a 400 - the alert is lost and only the API knows why.
+
+    Blanking the value makes the channel unconfigured instead, which the startup
+    warning in main() and validate_config() already handle. Returns the affected
+    section names for that warning.
+    """
+    unresolved = []
+    for section, key in _CREDENTIAL_FIELDS:
+        if section not in config:
+            continue
+        if _is_unresolved_placeholder(config[section].get(key)):
+            unresolved.append(section)
+            config[section][key] = ""
+    return sorted(set(unresolved))
 
 
 
@@ -86,9 +131,14 @@ def load_config() -> Dict[str, Any]:
         "SLACK_WEBHOOK_URL", config["slack"].get("webhook_url", "")
     )
 
-    # Monitoring defaults (next-epoch active set exit warning is opt-out)
+    # Monitoring defaults
     if "monitoring" not in config:
         config["monitoring"] = {}
+
+    # A credential that never resolved from .env is still the config.yaml
+    # "${VARIABLE}" literal - blank it so "configured" checks tell the truth.
+    # Reported per channel by main(), which has the logger up by then.
+    config["_unresolved_placeholders"] = drop_unresolved_placeholders(config)
 
     return config
 

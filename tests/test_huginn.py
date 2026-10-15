@@ -1097,7 +1097,7 @@ class TestUptime30dWindow:
 
 
 class TestValidatorSet:
-    """Huginn staking API: next-epoch exit detection"""
+    """Huginn staking API: validator-set membership and the secp -> id map"""
 
     @pytest.fixture
     def client(self):
@@ -1291,9 +1291,9 @@ class TestValidatorSet:
     def test_partial_map_is_cached_briefly_not_for_the_full_interval(self, client):
         """A page failure must not be trusted for a whole cache interval
 
-        The next-epoch exit warning depends on this map: caching a partial one for
-        check_interval would silently skip the warning for an hour. It is cached
-        just long enough to avoid re-paging on every cycle.
+        The re-entry note on LEFT alerts depends on this map: caching a partial
+        one for check_interval would silently skip the note for an hour. It is
+        cached just long enough to avoid re-paging on every cycle.
         """
         with responses.RequestsMock() as rsps:
             # Page 1 succeeds, page 2 fails -> partial map (3 of 3 unknown)

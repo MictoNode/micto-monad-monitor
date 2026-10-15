@@ -245,6 +245,16 @@ def main():
     logger = get_logger()
 
     # Validate configuration at startup (clear error messages for misconfig)
+    # A channel whose credentials never resolved (typically a commented-out line
+    # in .env) was blanked by load_config: say so once, loudly - otherwise the
+    # only sign is a debug line at the first alert, long after an alert was due.
+    for channel in config.pop("_unresolved_placeholders", []):
+        logger.warning(
+            f"{channel.capitalize()} credentials are unresolved - still the "
+            f"config.yaml ${{VARIABLE}} placeholder because the environment "
+            f"variable is not set (check .env). Channel disabled."
+        )
+
     try:
         validate_config(config)
         validate_validators(validators)
@@ -491,8 +501,7 @@ def main():
 
                     # Huginn staking validator set, fetched at most once per
                     # VALIDATOR_SET_CACHE_TTL per network (client-side cache).
-                    # Needed both for the next-epoch exit warning and for the
-                    # re-entry note on LEFT alerts.
+                    # Feeds the re-entry note on LEFT alerts.
                     network = validator.network or "testnet"
                     if huginn_client and network not in validator_set_cache:
                         try:

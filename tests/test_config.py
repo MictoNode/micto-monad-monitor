@@ -7,6 +7,7 @@ import pytest
 
 from monad_monitor.config import (
     ValidatorConfig,
+    load_config,
     load_validators,
     validate_config,
     validate_validators,
@@ -216,6 +217,72 @@ thresholds:
 
         assert result["telegram"]["token"] == "env-token"
         assert result["telegram"]["chat_id"] == "env-chat"
+
+    PLACEHOLDER_CONFIG_YAML = """
+telegram:
+  token: "${TELEGRAM_TOKEN}"
+  chat_id: "${TELEGRAM_CHAT_ID}"
+
+pushover:
+  user_key: "${PUSHOVER_USER_KEY}"
+  app_token: "${PUSHOVER_APP_TOKEN}"
+
+monitoring:
+  check_interval: 60
+
+thresholds:
+  cpu_warning: 90
+  cpu_critical: 95
+"""
+
+    def test_unresolved_placeholders_are_blanked_and_reported(self):
+        """A commented-out .env line must not look like a working credential
+
+        The literal reaches the API as `${PUSHOVER_APP_TOKEN}` and every send
+        comes back 400; blanking it makes the channel unconfigured instead.
+        """
+        with patch("builtins.open", mock_open(read_data=self.PLACEHOLDER_CONFIG_YAML)):
+            with patch.dict(os.environ, {"CONFIG_PATH": "test.yaml"}, clear=True):
+                result = load_config()
+
+        assert result["pushover"]["app_token"] == ""
+        assert result["pushover"]["user_key"] == ""
+        assert result["telegram"]["token"] == ""
+        assert result["_unresolved_placeholders"] == ["pushover", "telegram"]
+
+    def test_resolved_credential_is_kept_and_only_its_channel_reported(self):
+        with patch("builtins.open", mock_open(read_data=self.PLACEHOLDER_CONFIG_YAML)):
+            with patch.dict(
+                os.environ,
+                {"CONFIG_PATH": "test.yaml", "PUSHOVER_APP_TOKEN": "real-app-token"},
+                clear=True,
+            ):
+                result = load_config()
+
+        assert result["pushover"]["app_token"] == "real-app-token"
+        # The sibling field of the same section is still unresolved
+        assert result["pushover"]["user_key"] == ""
+        assert result["_unresolved_placeholders"] == ["pushover", "telegram"]
+
+    def test_placeholder_only_channels_fail_validation(self):
+        """With every credential unresolved the monitor must refuse to start"""
+        with patch("builtins.open", mock_open(read_data=self.PLACEHOLDER_CONFIG_YAML)):
+            with patch.dict(os.environ, {"CONFIG_PATH": "test.yaml"}, clear=True):
+                result = load_config()
+
+        with pytest.raises(ConfigValidationError) as exc_info:
+            validate_config(result)
+        assert "No alert channels configured" in str(exc_info.value)
+
+    def test_placeholder_detection_ignores_real_credentials(self):
+        from monad_monitor.config import _is_unresolved_placeholder
+
+        assert _is_unresolved_placeholder("${PUSHOVER_APP_TOKEN}") is True
+        assert _is_unresolved_placeholder("  ${PUSHOVER_APP_TOKEN}  ") is True
+        assert _is_unresolved_placeholder("azGDORePK8gMaC0QOYAMyEEuzJnyUi") is False
+        assert _is_unresolved_placeholder("https://discord.com/api/webhooks/1/x") is False
+        assert _is_unresolved_placeholder(None) is False
+        assert _is_unresolved_placeholder(123) is False
 
 
 class TestValidateConfig:

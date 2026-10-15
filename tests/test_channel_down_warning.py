@@ -98,20 +98,39 @@ class TestChannelDownWarning:
             handler.send_telegram("hello")
             assert len([c for c in rsps.calls if c.request.url == DISCORD_URL]) == 1
 
-    def test_client_error_is_not_an_outage(self):
-        """A 400 comes from our own payload, so it must not mark the channel down"""
+    def test_rejected_requests_warn_and_carry_the_api_reason(self):
+        """A 400 is not an unreachable channel - but it still loses alerts
+
+        Pushover answers a bad credential with 400 forever, so the streak has to
+        reach the operator; the wording keeps it clear that the API answered and
+        what it said, instead of blaming the network.
+        """
         handler = make_handler()
 
-        for _ in range(CHANNEL_FAILURE_ALERT_THRESHOLD + 1):
+        bodies = []
+        for _ in range(CHANNEL_FAILURE_ALERT_THRESHOLD):
             with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
-                rsps.add(responses.POST, TELEGRAM_URL, json={}, status=400)
+                rsps.add(
+                    responses.POST,
+                    TELEGRAM_URL,
+                    json={"ok": False, "description": "Bad Request: chat not found"},
+                    status=400,
+                )
                 rsps.add(responses.POST, DISCORD_URL, json={}, status=204)
                 assert handler.send_telegram("hello") is False
-                assert [c for c in rsps.calls if c.request.url == DISCORD_URL] == []
+                bodies += [
+                    json.loads(c.request.body)["embeds"][0]["description"]
+                    for c in rsps.calls
+                    if c.request.url == DISCORD_URL
+                ]
 
-        stats = handler.get_channel_stats()["telegram"]
-        assert stats["consecutive_failures"] == 0
-        assert stats["failed"] == CHANNEL_FAILURE_ALERT_THRESHOLD + 1
+        assert len(bodies) == 1
+        assert "rejected by the API" in bodies[0]
+        assert "chat not found" in bodies[0]
+        assert (
+            handler.get_channel_stats()["telegram"]["consecutive_failures"]
+            == CHANNEL_FAILURE_ALERT_THRESHOLD
+        )
 
     def test_all_channels_down_logs_and_does_not_raise(self, caplog):
         handler = make_handler(discord=False)

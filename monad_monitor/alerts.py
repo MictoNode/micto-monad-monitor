@@ -70,11 +70,13 @@ def unescape_markdown(text: str) -> str:
 
 
 def _failure_is_outage(exc: Exception) -> bool:
-    """Whether a send failure means the channel is down (vs our message bad).
+    """Whether a send failure means the channel is unreachable.
 
-    400/413 come from our own payload (unparseable/too long), so they must not
-    mark a healthy channel as down; auth failures, rate limits, missing
-    endpoints, server errors and connection errors all do.
+    400/413 come from our own payload (unparseable/too long) rather than from a
+    broken channel, so the channel-down warning words them as "requests rejected
+    by the API". Both classes still count toward the streak: either way the
+    alerts are not being delivered, and a rejected credential would otherwise
+    keep the channel silent forever.
     """
     response = getattr(exc, "response", None)
     if response is None:
@@ -87,13 +89,61 @@ def _failure_is_outage(exc: Exception) -> bool:
     return True
 
 
-def redact_error(text: str, secrets: Optional[List[str]] = None) -> str:
-    """Strip URLs and known credentials from an exception message"""
-    redacted = _URL_IN_ERROR_RE.sub("<redacted>", text)
+def _redact_secrets(text: str, secrets: Optional[List[str]] = None) -> str:
+    """Strip known credentials from a string (no URL handling)"""
     for secret in secrets or []:
         if secret:
-            redacted = redacted.replace(secret, "<redacted>")
-    return redacted
+            text = text.replace(secret, "<redacted>")
+    return text
+
+
+def redact_error(text: str, secrets: Optional[List[str]] = None) -> str:
+    """Strip URLs and known credentials from an exception message"""
+    return _redact_secrets(_URL_IN_ERROR_RE.sub("<redacted>", text), secrets)
+
+
+def api_error_detail(exc: Exception, secrets: Optional[List[str]] = None) -> str:
+    """The alert API's own reason for rejecting a request ("" if it gave none).
+
+    `requests.raise_for_status()` carries only the status line, so a 4xx body is
+    dropped unless it is read here - and that body is the ONLY place the API
+    names what it rejected. For Pushover it says "application token is invalid"
+    (an unset credential looks exactly like a dead channel without it); for
+    Telegram it is the parse error. The `request` id Pushover adds is what their
+    support asks for.
+    """
+    response = getattr(exc, "response", None)
+    if response is None:
+        return ""
+    try:
+        body = response.json()
+    except ValueError:  # HTML error page, empty body, ...
+        return ""
+    if not isinstance(body, dict):
+        return ""
+
+    raw_errors = body.get("errors")
+    parts = (
+        [str(item) for item in raw_errors if str(item).strip()]
+        if isinstance(raw_errors, list)
+        else []
+    )
+    parts += [
+        body[key]
+        for key in ("description", "message", "error")
+        if isinstance(body.get(key), str) and body[key].strip()
+    ]
+    if not parts:
+        return ""
+
+    detail = _redact_secrets("; ".join(parts)[:300], secrets)
+    request_id = body.get("request")
+    suffix = (
+        f" (request {request_id})"
+        if isinstance(request_id, str) and request_id
+        else ""
+    )
+    return f" - {detail}{suffix}"
 
 
 class AlertHandler:
@@ -189,12 +239,22 @@ class AlertHandler:
         self._queue_write_failed_logged = False
         self._load_failed_alerts()
 
-        # A channel that crossed the outage threshold already had its operator
+        # A channel that crossed the failure threshold already had its operator
         # warning; reset when it delivers again (one warning per episode)
         self._channel_down_notified: Dict[str, bool] = {c: False for c in CHANNELS}
 
+        # Why the channel is failing, for the warning above (kept out of
+        # _channel_stats so the /health payload shape stays stable)
+        self._channel_last_failure: Dict[str, str] = {c: "" for c in CHANNELS}
+        self._channel_last_unreachable: Dict[str, bool] = {c: False for c in CHANNELS}
+
     def _record_send(
-        self, channel: str, success: bool, track: bool = True, outage: bool = True
+        self,
+        channel: str,
+        success: bool,
+        track: bool = True,
+        outage: bool = True,
+        error: str = "",
     ) -> bool:
         """Record one channel delivery outcome.
 
@@ -202,8 +262,12 @@ class AlertHandler:
             track: False for messages the monitor sends about itself (a
                 channel-down warning), so they never perturb the counters they
                 are derived from.
-            outage: whether this failure means the channel is unreachable. Our
-                own malformed/oversized payloads do not.
+            outage: whether this failure means the channel is unreachable (as
+                opposed to the API rejecting our request). Kept for the wording
+                of the channel-down warning - both classes count toward the
+                streak, because either way the alerts are being lost.
+            error: the API's/transport's reason, shown in the channel-down
+                warning (the operator may never read the container log).
 
         Returns:
             True when this call crossed the channel-down threshold (the caller
@@ -218,14 +282,16 @@ class AlertHandler:
                 stats["sent"] += 1
                 stats["consecutive_failures"] = 0
                 self._channel_down_notified[channel] = False
+                self._channel_last_failure[channel] = ""
                 return False
 
             stats["failed"] += 1
-            if outage:
-                stats["consecutive_failures"] += 1
+            stats["consecutive_failures"] += 1
+            self._channel_last_unreachable[channel] = outage
+            if error:
+                self._channel_last_failure[channel] = error
             if (
-                outage
-                and stats["consecutive_failures"] >= CHANNEL_FAILURE_ALERT_THRESHOLD
+                stats["consecutive_failures"] >= CHANNEL_FAILURE_ALERT_THRESHOLD
                 and not self._channel_down_notified[channel]
             ):
                 self._channel_down_notified[channel] = True
@@ -273,11 +339,18 @@ class AlertHandler:
             )
             return False
 
+        cause = (
+            "channel unreachable"
+            if self._channel_last_unreachable.get(channel)
+            else "requests rejected by the API"
+        )
+        detail = self._channel_last_failure.get(channel, "")
         message = (
             f"⚠️ Alert channel degraded: *{channel}*\n\n"
             f"{stats[channel]['consecutive_failures']} consecutive delivery failures "
-            f"(configured={self._channel_is_configured(channel)}).\n"
-            f"Alerts are still going out through: {', '.join(healthy)}.\n"
+            f"({cause}, configured={self._channel_is_configured(channel)}).\n"
+            + (f"Last error: {detail}\n" if detail else "")
+            + f"Alerts are still going out through: {', '.join(healthy)}.\n"
             f"Verify the {channel} credentials/webhook in your configuration."
         )
         delivered = False
@@ -345,10 +418,18 @@ class AlertHandler:
                 logger.info("Telegram CRITICAL alert sent (rate limit bypassed)")
             return True
         except requests.exceptions.RequestException as e:
-            crossed = self._record_send(
-                "telegram", False, track=track, outage=_failure_is_outage(e)
+            detail = (
+                f"{redact_error(str(e), self._secrets)}"
+                f"{api_error_detail(e, self._secrets)}"
             )
-            logger.error(f"Telegram send error: {redact_error(str(e), self._secrets)}")
+            crossed = self._record_send(
+                "telegram",
+                False,
+                track=track,
+                outage=_failure_is_outage(e),
+                error=detail,
+            )
+            logger.error(f"Telegram send error: {detail}")
             if crossed:
                 self._warn_channel_down("telegram")
             return False
@@ -430,10 +511,18 @@ class AlertHandler:
                 logger.info(f"Pushover CRITICAL alert sent for {validator_name or 'unknown'}")
             return True
         except requests.exceptions.RequestException as e:
-            crossed = self._record_send(
-                "pushover", False, track=track, outage=_failure_is_outage(e)
+            detail = (
+                f"{redact_error(str(e), self._secrets)}"
+                f"{api_error_detail(e, self._secrets)}"
             )
-            logger.error(f"Pushover send error: {redact_error(str(e), self._secrets)}")
+            crossed = self._record_send(
+                "pushover",
+                False,
+                track=track,
+                outage=_failure_is_outage(e),
+                error=detail,
+            )
+            logger.error(f"Pushover send error: {detail}")
             if crossed:
                 self._warn_channel_down("pushover")
             return False
@@ -497,10 +586,18 @@ class AlertHandler:
                 logger.info("Discord CRITICAL alert sent (rate limit bypassed)")
             return True
         except requests.exceptions.RequestException as e:
-            crossed = self._record_send(
-                "discord", False, track=track, outage=_failure_is_outage(e)
+            detail = (
+                f"{redact_error(str(e), self._secrets)}"
+                f"{api_error_detail(e, self._secrets)}"
             )
-            logger.error(f"Discord send error: {redact_error(str(e), self._secrets)}")
+            crossed = self._record_send(
+                "discord",
+                False,
+                track=track,
+                outage=_failure_is_outage(e),
+                error=detail,
+            )
+            logger.error(f"Discord send error: {detail}")
             if crossed:
                 self._warn_channel_down("discord")
             return False
@@ -557,10 +654,18 @@ class AlertHandler:
                 logger.info("Slack CRITICAL alert sent (rate limit bypassed)")
             return True
         except requests.exceptions.RequestException as e:
-            crossed = self._record_send(
-                "slack", False, track=track, outage=_failure_is_outage(e)
+            detail = (
+                f"{redact_error(str(e), self._secrets)}"
+                f"{api_error_detail(e, self._secrets)}"
             )
-            logger.error(f"Slack send error: {redact_error(str(e), self._secrets)}")
+            crossed = self._record_send(
+                "slack",
+                False,
+                track=track,
+                outage=_failure_is_outage(e),
+                error=detail,
+            )
+            logger.error(f"Slack send error: {detail}")
             if crossed:
                 self._warn_channel_down("slack")
             return False

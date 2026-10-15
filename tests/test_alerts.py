@@ -8,7 +8,7 @@ import pytest
 import requests
 import responses
 
-from monad_monitor.alerts import AlertHandler, redact_error
+from monad_monitor.alerts import AlertHandler, api_error_detail, redact_error
 
 
 class TestAlertHandler:
@@ -1097,6 +1097,108 @@ class TestAlertLogRedaction:
         logged = self._logged_text(caplog)
         assert "SECRET-DISCORD-HOOK" not in logged
         assert "SECRET-SLACK-HOOK" not in logged
+
+    def test_pushover_rejection_logs_the_reason_and_request_id(self, handler, caplog):
+        """The 4xx body is the only place Pushover names what it rejected
+
+        Without it a rejected credential and a dead channel look identical.
+        """
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.POST,
+                "https://api.pushover.net/1/messages.json",
+                json={
+                    "user": "invalid",
+                    "errors": [
+                        "application token is invalid, see https://pushover.net/api"
+                    ],
+                    "status": 0,
+                    "request": "912b00e1-af13-4c6c-abc1-a8045ab63267",
+                },
+                status=400,
+            )
+
+            with caplog.at_level(logging.ERROR):
+                assert handler.send_pushover("Test message") is False
+
+        logged = self._logged_text(caplog)
+        assert "application token is invalid" in logged
+        assert "912b00e1-af13-4c6c-abc1-a8045ab63267" in logged
+
+    def test_api_error_body_echoing_a_key_is_redacted(self, handler, caplog):
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.POST,
+                "https://api.pushover.net/1/messages.json",
+                json={"errors": ["token app-token-secret is invalid"], "status": 0},
+                status=400,
+            )
+
+            with caplog.at_level(logging.ERROR):
+                assert handler.send_pushover("Test message") is False
+
+        logged = self._logged_text(caplog)
+        assert "app-token-secret" not in logged
+        assert "is invalid" in logged
+
+
+class TestApiErrorDetail:
+    """`requests` keeps only the status line; the API's reason lives in the body"""
+
+    def _http_error(self, body, status=400, content_type="application/json"):
+        response = requests.Response()
+        response.status_code = status
+        response._content = (
+            body if isinstance(body, bytes) else json.dumps(body).encode()
+        )
+        response.headers["Content-Type"] = content_type
+        return requests.exceptions.HTTPError(f"{status} Client Error", response=response)
+
+    def test_pushover_body_names_the_rejected_parameter(self):
+        detail = api_error_detail(
+            self._http_error(
+                {
+                    "user": "invalid",
+                    "errors": ["application token is invalid"],
+                    "status": 0,
+                    "request": "abc-123",
+                }
+            )
+        )
+
+        assert "application token is invalid" in detail
+        assert "(request abc-123)" in detail
+
+    def test_telegram_discord_and_slack_bodies_are_read_too(self):
+        assert "chat not found" in api_error_detail(
+            self._http_error({"ok": False, "description": "Bad Request: chat not found"})
+        )
+        assert "Unknown Webhook" in api_error_detail(
+            self._http_error({"message": "Unknown Webhook", "code": 10015}, status=404)
+        )
+        assert "invalid_payload" in api_error_detail(
+            self._http_error({"ok": False, "error": "invalid_payload"})
+        )
+
+    def test_no_reason_available_returns_nothing(self):
+        assert api_error_detail(requests.exceptions.ConnectionError("boom")) == ""
+        assert api_error_detail(
+            self._http_error(b"<html>nope</html>", content_type="text/html")
+        ) == ""
+        assert api_error_detail(self._http_error({"status": 0})) == ""
+        assert api_error_detail(self._http_error([1, 2, 3])) == ""
+
+    def test_long_bodies_are_capped(self):
+        assert len(api_error_detail(self._http_error({"errors": ["x" * 5000]}))) < 350
+
+    def test_secret_echoed_in_the_body_is_redacted(self):
+        detail = api_error_detail(
+            self._http_error({"errors": ["token app-token-secret is invalid"]}),
+            ["app-token-secret"],
+        )
+
+        assert "app-token-secret" not in detail
+        assert "is invalid" in detail
 
 
 class TestChannelDeliveryStats:

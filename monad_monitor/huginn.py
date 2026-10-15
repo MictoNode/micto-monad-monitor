@@ -53,16 +53,16 @@ MAX_VALIDATOR_PAGES = 10
 
 # Forward-looking validator-set data must be sampled densely: the next-epoch
 # snapshot can appear shortly before the epoch boundary, and a stale cache
-# turns the next-epoch exit warning into a lottery. 120s stays far inside the
+# turns the LEFT re-entry note into a lottery. 120s stays far inside the
 # staking rate budget (60 req/min/IP shared across all staking calls).
 VALIDATOR_SET_CACHE_TTL = 120
 
 # secp -> validator_id map. A COMPLETE map is stable and cached for the full
 # check_interval; a PARTIAL one (a page failed mid-pagination, or the API
-# stopped reporting `total`) must not be trusted that long or the next-epoch
-# exit warning is silently skipped for an hour. It is cached briefly instead -
-# long enough to avoid re-paging on every cycle against the shared 60 req/min
-# staking budget, short enough to self-heal.
+# stopped reporting `total`) must not be trusted that long or the re-entry note
+# is silently skipped for an hour. It is cached briefly instead - long enough to
+# avoid re-paging on every cycle against the shared 60 req/min staking budget,
+# short enough to self-heal.
 PARTIAL_SECP_ID_MAP_TTL = 120
 
 
@@ -752,7 +752,7 @@ class HuginnClient:
             if not self._validator_set_failure_logged.get(cache_key, False):
                 self._logger.warning(
                     f"Validator set fetch failed for {network} - "
-                    f"next-epoch exit warning runs on cached data"
+                    f"LEFT alerts run without the re-entry note"
                 )
                 self._validator_set_failure_logged[cache_key] = True
             else:

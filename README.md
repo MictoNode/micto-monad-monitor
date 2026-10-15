@@ -590,6 +590,22 @@ curl -X POST "https://api.telegram.org/bot<TOKEN>/sendMessage" \
   -d "chat_id=<CHAT_ID>&text=Test"
 ```
 
+### A channel stays silent (Pushover/Discord/Slack)
+
+`config.yaml` ships every credential as a `${VARIABLE}` placeholder that is
+replaced only when the variable exists. A **commented-out line in `.env`** leaves
+the literal behind, so the monitor now blanks it, disables that channel, and says
+so at startup:
+
+```
+WARNING Pushover credentials are unresolved - still the config.yaml ${VARIABLE}
+placeholder because the environment variable is not set (check .env). Channel disabled.
+```
+
+Uncomment the variables in `.env` (or set them in `docker compose`'s
+`environment:`) and restart. If *every* channel is unresolved, the monitor
+refuses to start with `No alert channels configured`.
+
 ### Dashboard not loading
 
 ```bash
@@ -696,9 +712,12 @@ UptimeRobot, an orchestrator) at `/health` and it means what it says:
 ```
 
 The `alerts` counters show whether each channel is really delivering: if one
-keeps failing, the monitor warns you once through the channels that still work.
-A CRITICAL that no channel accepted is retried automatically, and the queue
-survives restarts (kept in `/app/state`).
+keeps failing, the monitor warns you once through the channels that still work,
+including the reason the API gave (e.g. `application token is invalid`).
+`consecutive_failures` counts every failed delivery - a rejected request counts
+too, because a bad credential answers the same way forever and would otherwise
+keep the channel silent. A CRITICAL that no channel accepted is retried
+automatically, and the queue survives restarts (kept in `/app/state`).
 
 ### Monitor Dashboard (:8282)
 
@@ -736,7 +755,7 @@ through a reverse proxy in a typical deployment).
 
 | API | Purpose | Rate Limit |
 |-----|---------|------------|
-| [Huginn Tech](https://huginn.tech) | Validator uptime (24h, 30d, all-time), active-set status, next-epoch exit warnings | No documented per-validator limit; the staking endpoints (`/staking/validator-set`, `/validators`) share **60 req/min/IP** and the monitor caches to stay well inside it |
+| [Huginn Tech](https://huginn.tech) | Validator uptime (24h, 30d, all-time), active-set status, re-entry note on left alerts | No documented per-validator limit; the staking endpoints (`/staking/validator-set`, `/validators`) share **60 req/min/IP** and the monitor caches to stay well inside it |
 | [gmonads.com](https://gmonads.com) | Network TPS, block fullness, fallback | 30 req/min |
 
 ---
